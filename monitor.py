@@ -304,7 +304,7 @@ def _call_claude(prompt: str) -> str:
     """Anthropic Messages API를 호출한다."""
     url = "https://api.anthropic.com/v1/messages"
     payload = json.dumps({
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-haiku-3-5-20241022",
         "max_tokens": 4096,
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
