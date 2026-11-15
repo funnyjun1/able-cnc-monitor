@@ -314,10 +314,14 @@ def _call_claude(prompt: str) -> str:
     req.add_header("x-api-key", ANTHROPIC_API_KEY)
     req.add_header("anthropic-version", "2023-06-01")
 
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=120) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
-    return data["content"][0]["text"]
+    # text 블록만 추출 (thinking 블록 등 제외)
+    for block in data["content"]:
+        if block.get("type") == "text":
+            return block["text"]
+    return data["content"][0].get("text", "")
 
 
 def _generate_ceo_summary(articles: list[dict]) -> str:
@@ -350,7 +354,10 @@ def _send_email(html: str, subject: str) -> bool:
         msg["To"] = EMAIL_TO
         msg.attach(MIMEText(html, "html", "utf-8"))
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
             server.login(EMAIL_FROM, EMAIL_PASSWORD)
             server.send_message(msg)
 
