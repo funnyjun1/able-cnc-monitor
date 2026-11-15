@@ -1,7 +1,13 @@
 """
-에이블씨엔씨 뉴스 모니터링 시스템
-수집(RSS) → 검사(Claude) → 발송(이메일) 3단계 구조
+에이블씨엔씨 뉴스 모니터링 시스템 v2
+수집(네이버 API + 구글 RSS + 다음 RSS) → 분류(Claude) → 발송(이메일)
 GitHub Actions에서 평일 아침 자동 실행
+
+카테고리:
+  - 자사 배포: 에이블씨엔씨/미샤가 주요 소재인 기사
+  - 자사 언급: 에이블씨엔씨/미샤가 짧게 언급된 기사
+  - 경쟁사: 달바글로벌, 스킨푸드, 아모레퍼시픽, LG생활건강 등
+  - 업계: K뷰티, 화장품 업계 전반
 """
 
 import os
@@ -15,54 +21,79 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from html import unescape
 
 # ─── 환경 변수 ───
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "")
+NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
-EMAIL_FROM = os.environ.get("EMAIL_FROM", "funnyjun@gmail.com")
-EMAIL_TO = os.environ.get("EMAIL_TO", "funnyjun@gmail.com")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "")
+EMAIL_TO = os.environ.get("EMAIL_TO", "")
 
-KEYWORDS = ["에이블씨엔씨", "미샤", "MISSHA", "어퓨", "초공진"]
+# ─── 키워드 설정 ───
+COMPANY_KEYWORDS = ["에이블씨엔씨", "미샤", "MISSHA", "어퓨", "초공진"]
+COMPETITOR_KEYWORDS = ["달바글로벌", "스킨푸드", "아모레퍼시픽", "LG생활건강", "에이피알"]
+INDUSTRY_KEYWORDS = ["K뷰티", "K-뷰티", "화장품 수출", "뷰티 업계"]
+
 HISTORY_FILE = "sent_history.json"
 
 
 # ═══════════════════════════════════════════
-# 1단계: 수집 직원 (Collector)
+# 1단계: 수집
 # ═══════════════════════════════════════════
 
-def collect_google_news(keyword: str) -> list[dict]:
-    """구글 뉴스 RSS로 기사를 수집한다."""
+def collect_naver_api(keyword: str, display: int = 30) -> list[dict]:
+    """네이버 뉴스 검색 API로 기사를 수집한다."""
+    if not NAVER_CLIENT_ID:
+        return []
+
     encoded = urllib.parse.quote(keyword)
-    url = f"https://news.google.com/rss/search?q={encoded}+when:1d&hl=ko&gl=KR&ceid=KR:ko"
+    url = f"https://openapi.naver.com/v1/search/news.json?query={encoded}&display={display}&sort=date"
     req = urllib.request.Request(url)
-    req.add_header("User-Agent", "Mozilla/5.0")
+    req.add_header("X-Naver-Client-Id", NAVER_CLIENT_ID)
+    req.add_header("X-Naver-Client-Secret", NAVER_CLIENT_SECRET)
 
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            root = ET.fromstring(resp.read())
+            data = json.loads(resp.read().decode("utf-8"))
+
         articles = []
-        for item in root.findall(".//item"):
-            title = item.findtext("title", "")
-            link = item.findtext("link", "")
-            pub_date = item.findtext("pubDate", "")
-            source = item.findtext("source", "")
+        for item in data.get("items", []):
+            title = _strip_html(item.get("title", ""))
+            link = item.get("originallink", "") or item.get("link", "")
+            desc = _strip_html(item.get("description", ""))
+            pub_date = item.get("pubDate", "")
             articles.append({
                 "title": title,
                 "link": link,
-                "description": "",
+                "description": desc,
                 "pub_date": pub_date,
-                "source": source if source else "google",
+                "source": "naver",
+                "search_keyword": keyword,
             })
         return articles
     except Exception as e:
-        print(f"[수집] 구글 뉴스 오류 ({keyword}): {e}")
+        print(f"[수집] 네이버 API 오류 ({keyword}): {e}")
         return []
 
 
-def collect_naver_rss(keyword: str) -> list[dict]:
-    """네이버 뉴스 RSS로 기사를 수집한다 (API 키 불필요)."""
+def collect_google_rss(keyword: str) -> list[dict]:
+    """구글 뉴스 RSS로 기사를 수집한다."""
     encoded = urllib.parse.quote(keyword)
-    url = f"https://news.google.com/rss/search?q={encoded}+site:news.naver.com+when:1d&hl=ko&gl=KR&ceid=KR:ko"
+    url = f"https://news.google.com/rss/search?q={encoded}+when:1d&hl=ko&gl=KR&ceid=KR:ko"
+    return _fetch_rss(url, keyword, "google")
+
+
+def collect_daum_rss(keyword: str) -> list[dict]:
+    """다음 뉴스를 구글 RSS 경유로 수집한다."""
+    encoded = urllib.parse.quote(keyword)
+    url = f"https://news.google.com/rss/search?q={encoded}+site:v.daum.net+when:1d&hl=ko&gl=KR&ceid=KR:ko"
+    return _fetch_rss(url, keyword, "daum")
+
+
+def _fetch_rss(url: str, keyword: str, source: str) -> list[dict]:
+    """RSS URL에서 기사를 가져온다."""
     req = urllib.request.Request(url)
     req.add_header("User-Agent", "Mozilla/5.0")
 
@@ -74,27 +105,35 @@ def collect_naver_rss(keyword: str) -> list[dict]:
             title = item.findtext("title", "")
             link = item.findtext("link", "")
             pub_date = item.findtext("pubDate", "")
-            source = item.findtext("source", "")
+            src = item.findtext("source", "") or source
             articles.append({
                 "title": title,
                 "link": link,
                 "description": "",
                 "pub_date": pub_date,
-                "source": source if source else "naver",
+                "source": src,
+                "search_keyword": keyword,
             })
         return articles
     except Exception as e:
-        print(f"[수집] 네이버 RSS 오류 ({keyword}): {e}")
+        print(f"[수집] {source} RSS 오류 ({keyword}): {e}")
         return []
 
 
 def collect_all() -> list[dict]:
     """모든 소스에서 기사를 수집하고 중복을 제거한다."""
     all_articles = []
-    for kw in KEYWORDS:
-        all_articles.extend(collect_google_news(kw))
-        all_articles.extend(collect_naver_rss(kw))
-        print(f"[수집] '{kw}' 완료: 누적 {len(all_articles)}건")
+    all_keywords = COMPANY_KEYWORDS + COMPETITOR_KEYWORDS + INDUSTRY_KEYWORDS
+
+    for kw in all_keywords:
+        naver = collect_naver_api(kw)
+        all_articles.extend(naver)
+        google = collect_google_rss(kw)
+        all_articles.extend(google)
+        daum = collect_daum_rss(kw)
+        all_articles.extend(daum)
+        total_kw = len(naver) + len(google) + len(daum)
+        print(f"[수집] '{kw}': 네이버 {len(naver)} + 구글 {len(google)} + 다음 {len(daum)} = {total_kw}건")
 
     # 중복 제거 (제목 기준 해시)
     seen = set()
@@ -110,176 +149,206 @@ def collect_all() -> list[dict]:
 
 
 # ═══════════════════════════════════════════
-# 2단계: 검사 직원 (Reviewer)
+# 2단계: 분류 (Claude)
 # ═══════════════════════════════════════════
 
-def review_articles(articles: list[dict]) -> list[dict]:
-    """Claude에게 기사를 보내 유의미한 것만 골라내고 분석한다."""
+def classify_articles(articles: list[dict]) -> dict:
+    """Claude에게 기사를 보내 4개 카테고리로 분류한다."""
+    empty = {"자사배포": [], "자사언급": [], "경쟁사": [], "업계": []}
     if not articles:
-        return []
+        return empty
 
     # 이미 보낸 기사 제외
     history = _load_history()
-    new_articles = []
-    for a in articles:
-        h = _article_hash(a["title"])
-        if h not in history:
-            new_articles.append(a)
+    new_articles = [a for a in articles if _article_hash(a["title"]) not in history]
 
     if not new_articles:
-        print("[검사] 새 기사 없음")
-        return []
+        print("[분류] 새 기사 없음")
+        return empty
 
-    # 최대 60건만 분석 (비용 관리)
-    new_articles = new_articles[:60]
-    print(f"[검사] {len(new_articles)}건 분석 시작")
+    new_articles = new_articles[:100]
+    print(f"[분류] {len(new_articles)}건 분석 시작")
 
     article_text = ""
     for i, a in enumerate(new_articles, 1):
-        article_text += f"\n[{i}] {a['title']}\n출처: {a['source']} | {a['link']}\n"
+        desc = a.get("description", "")[:80]
+        article_text += f"[{i}] {a['title']} | 출처: {a['source']} | 검색어: {a['search_keyword']}"
+        if desc:
+            article_text += f" | {desc}"
+        article_text += "\n"
 
-    prompt = f"""다음은 '에이블씨엔씨'와 관련될 수 있는 뉴스 기사 목록입니다.
+    prompt = f"""다음은 화장품·뷰티 업계 뉴스 기사 목록입니다.
 
 {article_text}
 
-각 기사에 대해 다음을 판단해 주세요:
-1. 에이블씨엔씨(미샤, 어퓨, 초공진 포함)에 실질적으로 유의미한 기사인지 (YES/NO)
-2. YES인 경우: 감성(긍정/부정/중립), 한 줄 요약
+각 기사를 아래 5개 카테고리 중 하나로 분류하세요:
+- 자사배포: 에이블씨엔씨·미샤(MISSHA)·어퓨·초공진이 기사의 주요 소재
+- 자사언급: 에이블씨엔씨·미샤가 여러 브랜드 중 하나로 짧게 언급
+- 경쟁사: 달바글로벌·스킨푸드·아모레퍼시픽·LG생활건강·에이피알 등이 주요 소재
+- 업계: K뷰티·화장품 수출·뷰티 트렌드 등 업계 전반
+- 제외: 화장품과 무관, 동명이인(첼리스트 미샤 마이스키 등), 단순 광고
 
-JSON 배열로 응답해 주세요. 형식:
-[
-  {{"index": 1, "relevant": true, "sentiment": "긍정", "summary": "한 줄 요약"}},
-  {{"index": 2, "relevant": false}}
-]
-
-유의미하지 않은 기사(단순 광고, 에이블씨엔씨와 무관한 기사)는 relevant: false로 표시하세요."""
+감성(긍정/부정/중립)과 한 줄 요약을 포함해 JSON 배열로 응답:
+[{{"index":1,"category":"자사배포","sentiment":"긍정","summary":"요약"}}]"""
 
     try:
         result = _call_claude(prompt)
         start = result.find("[")
         end = result.rfind("]") + 1
-        if start >= 0 and end > start:
-            analyses = json.loads(result[start:end])
-        else:
-            print("[검사] Claude 응답에서 JSON을 찾을 수 없음")
-            return []
+        if start < 0 or end <= start:
+            print("[분류] JSON 파싱 실패")
+            return empty
 
-        reviewed = []
+        analyses = json.loads(result[start:end])
+        categorized = {"자사배포": [], "자사언급": [], "경쟁사": [], "업계": []}
+
         for item in analyses:
             idx = item.get("index", 0) - 1
-            if 0 <= idx < len(new_articles) and item.get("relevant"):
+            cat = item.get("category", "제외")
+            if 0 <= idx < len(new_articles) and cat in categorized:
                 article = new_articles[idx].copy()
                 article["sentiment"] = item.get("sentiment", "중립")
                 article["summary"] = item.get("summary", "")
-                reviewed.append(article)
+                categorized[cat].append(article)
 
-        print(f"[검사] 유의미한 기사: {len(reviewed)}건")
-        return reviewed
+        for cat, arts in categorized.items():
+            print(f"[분류] {cat}: {len(arts)}건")
+        return categorized
 
     except Exception as e:
-        print(f"[검사] Claude 분석 오류: {e}")
-        return []
+        print(f"[분류] 오류: {e}")
+        return empty
 
 
 # ═══════════════════════════════════════════
-# 3단계: 발송 직원 (Sender)
+# 3단계: 발송
 # ═══════════════════════════════════════════
 
-def send_report(articles: list[dict]) -> bool:
-    """분석된 기사를 HTML 이메일로 발송한다."""
+def send_report(categorized: dict) -> bool:
+    """분류된 기사를 HTML 이메일로 발송한다."""
     today = datetime.date.today().strftime("%Y-%m-%d")
     weekday = ["월", "화", "수", "목", "금", "토", "일"][datetime.date.today().weekday()]
+    total = sum(len(v) for v in categorized.values())
 
-    if not articles:
-        # 기사가 없어도 빈 보고서를 보냄
-        html = f"""
-        <html>
-        <head><meta charset="utf-8"></head>
-        <body style="font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; max-width: 700px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #333; border-bottom: 2px solid #0066cc; padding-bottom: 10px;">
-                📰 에이블씨엔씨 뉴스 모니터링 — {today} ({weekday})
-            </h2>
-            <p style="color: #666;">오늘 유의미한 뉴스가 없습니다.</p>
-            <hr style="margin-top: 30px;">
-            <p style="color: #aaa; font-size: 11px;">이 이메일은 GitHub Actions에서 자동 생성되었습니다.</p>
-        </body>
-        </html>
-        """
-        return _send_email(html, f"[에이블씨엔씨] 뉴스 모니터링 — {today} ({weekday}) | 기사 없음")
+    summary_text = _generate_summary(categorized) if total > 0 else ""
 
-    # CEO 요약 생성
-    ceo_summary = _generate_ceo_summary(articles)
+    html = _build_html(today, weekday, total, summary_text, categorized)
 
-    # HTML 이메일 본문
-    html = f"""
-    <html>
-    <head><meta charset="utf-8"></head>
-    <body style="font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; max-width: 700px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: #333; border-bottom: 2px solid #0066cc; padding-bottom: 10px;">
-            📰 에이블씨엔씨 뉴스 모니터링 — {today} ({weekday})
-        </h2>
+    parts = []
+    for k, v in categorized.items():
+        if v:
+            parts.append(f"{k} {len(v)}")
+    detail = ", ".join(parts) if parts else "기사 없음"
+    subject = f"[에이블씨엔씨] 뉴스 모니터링 — {today} ({weekday}) | {detail}"
 
-        <div style="background: #f0f7ff; padding: 15px; border-radius: 8px; margin: 15px 0;">
-            <h3 style="margin-top: 0; color: #0066cc;">💡 CEO 인사이트</h3>
-            <p style="line-height: 1.6;">{ceo_summary}</p>
-        </div>
+    success = _send_email(html, subject)
+    if success:
+        all_arts = [a for v in categorized.values() for a in v]
+        _save_history(all_arts)
+    return success
 
-        <h3>📋 주요 기사 ({len(articles)}건)</h3>
-        <table style="width: 100%; border-collapse: collapse;">
-    """
+
+def _build_html(today, weekday, total, summary_text, categorized):
+    """이메일 HTML 본문을 생성한다."""
+    html = f"""<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8">
+<title>ABLE C&amp;C DAILY MONITORING {today}</title></head>
+<body style="margin:0;padding:0;background-color:#FAF6F1;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FAF6F1;">
+<tr><td align="center" style="padding:16px;">
+<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#2B2620;">
+
+<tr><td style="padding:2px 4px 12px 4px;border-bottom:3px solid #E8730C;">
+<div style="font-size:27px;font-weight:bold;color:#2B2620;letter-spacing:.3px;">ABLE C&amp;C · DAILY MONITORING</div>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:9px;">
+<tr><td style="vertical-align:bottom;">
+<span style="font-size:20px;font-weight:bold;color:#C25A00;">{today.replace('-', '. ')} ({weekday})</span>
+</td><td align="right" style="vertical-align:bottom;font-size:12.5px;color:#857B6F;font-weight:bold;">
+GitHub Actions 자동 수집 · AI 분류
+</td></tr></table>
+</td></tr>"""
+
+    if total == 0:
+        html += """<tr><td style="padding:20px 0;">
+<div style="font-size:14px;color:#666;text-align:center;">오늘 유의미한 뉴스가 없습니다.</div>
+</td></tr>"""
+    else:
+        if summary_text:
+            html += f"""<tr><td style="padding:14px 0 0 0;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFF7EC;border:1px solid #F3C79B;">
+<tr><td style="padding:16px 18px;">
+<div style="font-size:16px;font-weight:bold;color:#2B2620;padding-bottom:8px;">Today Summary</div>
+<div style="font-size:13.5px;color:#4a4036;line-height:1.7;">{summary_text}</div>
+</td></tr></table></td></tr>"""
+
+        sections = [
+            ("자사배포", "1", "자사 배포"),
+            ("자사언급", "2", "자사 언급"),
+            ("경쟁사", "3", "경쟁사"),
+            ("업계", "4", "업계·트렌드"),
+        ]
+
+        for cat_key, num, label in sections:
+            arts = categorized[cat_key]
+            if not arts:
+                continue
+            html += _build_section(num, f"{label} ({len(arts)}건)", arts)
+
+    html += f"""<tr><td style="padding:16px 0 0 0;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E5DACB;">
+<tr><td align="center" style="padding:12px 15px;font-size:11.5px;color:#857B6F;">
+Monitoring by <b style="color:#2B2620;">프라우드컴(주)</b> · Copyright 2026 Proudcomm<br>
+<span style="font-size:10px;color:#aaa;">네이버 API + 구글 RSS + 다음 | Claude AI 분류</span>
+</td></tr></table></td></tr>
+
+</table></td></tr></table></body></html>"""
+    return html
+
+
+def _build_section(num: str, label: str, articles: list[dict]) -> str:
+    """하나의 카테고리 섹션 HTML을 만든다."""
+    s = f"""<tr><td style="padding:14px 0 0 0;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFFFF;border:1px solid #ECE3D8;">
+<tr><td style="padding:16px 18px;">
+<div style="font-size:16px;font-weight:bold;color:#2B2620;padding-bottom:6px;">
+<span style="color:#E8730C;">{num}</span> &nbsp;&nbsp;{label}</div>"""
 
     sentiment_colors = {"긍정": "#28a745", "부정": "#dc3545", "중립": "#6c757d"}
 
     for a in articles:
-        color = sentiment_colors.get(a.get("sentiment", "중립"), "#6c757d")
-        html += f"""
-            <tr style="border-bottom: 1px solid #eee;">
-                <td style="padding: 12px 8px;">
-                    <span style="display: inline-block; background: {color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 4px;">
-                        {a.get('sentiment', '중립')}
-                    </span>
-                    <br>
-                    <a href="{a['link']}" style="color: #333; text-decoration: none; font-weight: bold; font-size: 14px;">
-                        {a['title']}
-                    </a>
-                    <br>
-                    <span style="color: #888; font-size: 12px;">{a.get('summary', '')}</span>
-                    <br>
-                    <span style="color: #aaa; font-size: 11px;">출처: {a['source']}</span>
-                </td>
-            </tr>
-        """
+        sentiment = a.get("sentiment", "중립")
+        color = sentiment_colors.get(sentiment, "#6c757d")
+        title = a["title"]
+        link = a["link"]
+        source = a["source"]
+        summary = a.get("summary", "")
 
-    html += """
-        </table>
-        <hr style="margin-top: 30px;">
-        <p style="color: #aaa; font-size: 11px;">이 이메일은 GitHub Actions에서 자동 생성되었습니다.</p>
-    </body>
-    </html>
-    """
+        s += f"""<div style="font-size:14px;padding:7px 0;border-top:1px solid #F2ECE3;">
+<span style="display:inline-block;background:{color};color:white;padding:1px 6px;border-radius:3px;font-size:11px;">{sentiment}</span>&nbsp;
+<a href="{link}" style="color:#2B2620;text-decoration:none;font-weight:bold;">{title}</a>
+<span style="color:#C25A00;font-size:11px;font-weight:bold;"> {source} ›</span>
+<br><span style="color:#857B6F;font-size:12px;">{summary}</span></div>"""
 
-    subject = f"[에이블씨엔씨] 뉴스 모니터링 — {today} ({weekday}) | {len(articles)}건"
-    success = _send_email(html, subject)
-
-    if success:
-        _save_history(articles)
-
-    return success
+    s += "</td></tr></table></td></tr>"
+    return s
 
 
 # ═══════════════════════════════════════════
 # 보조 함수
 # ═══════════════════════════════════════════
 
+def _strip_html(text: str) -> str:
+    clean = re.sub(r"<[^>]+>", "", text)
+    return unescape(clean).strip()
+
+
 def _article_hash(title: str) -> str:
-    """기사 제목으로 해시를 만든다 (중복 판별용)."""
     clean = re.sub(r"^\[.*?\]\s*", "", title)
     clean = re.sub(r"\s+", "", clean)[:50]
     return hashlib.md5(clean.encode("utf-8")).hexdigest()[:12]
 
 
 def _load_history() -> set:
-    """이미 발송한 기사 해시 목록을 불러온다."""
     if not os.path.exists(HISTORY_FILE):
         return set()
     try:
@@ -291,21 +360,19 @@ def _load_history() -> set:
 
 
 def _save_history(articles: list[dict]):
-    """발송한 기사 해시를 저장한다 (최근 500건만 유지)."""
     history = _load_history()
     for a in articles:
         history.add(_article_hash(a["title"]))
-    hashes = list(history)[-500:]
+    hashes = list(history)[-1000:]
     with open(HISTORY_FILE, "w") as f:
         json.dump({"hashes": hashes, "updated": str(datetime.datetime.now())}, f)
 
 
 def _call_claude(prompt: str) -> str:
-    """Anthropic Messages API를 호출한다."""
     url = "https://api.anthropic.com/v1/messages"
     payload = json.dumps({
         "model": "claude-haiku-5-5",
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
 
@@ -317,36 +384,41 @@ def _call_claude(prompt: str) -> str:
     with urllib.request.urlopen(req, timeout=120) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
-    # text 블록만 추출 (thinking 블록 등 제외)
     for block in data["content"]:
         if block.get("type") == "text":
             return block["text"]
     return data["content"][0].get("text", "")
 
 
-def _generate_ceo_summary(articles: list[dict]) -> str:
-    """CEO용 인사이트를 생성한다."""
-    article_list = "\n".join(
-        f"- [{a.get('sentiment', '중립')}] {a['title']}: {a.get('summary', '')}"
-        for a in articles
-    )
+def _generate_summary(categorized: dict) -> str:
+    lines = []
+    for cat, articles in categorized.items():
+        for a in articles:
+            lines.append(f"[{cat}][{a.get('sentiment', '중립')}] {a['title']}: {a.get('summary', '')}")
+    if not lines:
+        return ""
 
-    prompt = f"""아래는 오늘 에이블씨엔씨 관련 주요 뉴스입니다.
+    prompt = f"""아래는 오늘 에이블씨엔씨 관련 뉴스 모니터링 결과입니다.
 
-{article_list}
+{chr(10).join(lines[:50])}
 
-PR 대행사 대표의 관점에서 CEO에게 보고하는 3~5줄 분량의 핵심 인사이트를 작성해 주세요.
-단순 나열이 아니라, 오늘 뉴스의 흐름과 의미를 짚어 주세요."""
+PR 대행사 대표의 관점에서 CEO에게 보고하는 핵심 인사이트를 작성하세요.
+- 자사 관련 기사가 있으면 먼저 다루세요
+- 경쟁사와 업계 동향을 간략히 짚어주세요
+- 3~5줄 분량으로, 흐름과 의미를 짚어주세요
+- HTML 형식, <b> 태그로 핵심 강조"""
 
     try:
         return _call_claude(prompt)
     except Exception as e:
-        print(f"[요약] CEO 요약 생성 오류: {e}")
-        return "CEO 인사이트를 생성하지 못했습니다."
+        print(f"[요약] 오류: {e}")
+        return ""
 
 
 def _send_email(html: str, subject: str) -> bool:
-    """HTML 이메일을 발송한다."""
+    if not EMAIL_FROM or not EMAIL_PASSWORD:
+        print("[발송] 이메일 설정 없음")
+        return False
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -361,31 +433,23 @@ def _send_email(html: str, subject: str) -> bool:
             server.login(EMAIL_FROM, EMAIL_PASSWORD)
             server.send_message(msg)
 
-        print(f"[발송] 이메일 발송 완료")
+        print(f"[발송] 완료: {subject}")
         return True
     except Exception as e:
-        print(f"[발송] 이메일 발송 오류: {e}")
+        print(f"[발송] 오류: {e}")
         return False
 
 
 # ═══════════════════════════════════════════
-# 실행
-# ═══════════════════════════════════════════
-
 if __name__ == "__main__":
-    print("=" * 50)
-    print(f"에이블씨엔씨 뉴스 모니터링 시작: {datetime.datetime.now()}")
-    print("=" * 50)
+    print("=" * 60)
+    print(f"에이블씨엔씨 뉴스 모니터링 v2 시작: {datetime.datetime.now()}")
+    print("=" * 60)
 
-    # 1단계: 수집
     articles = collect_all()
+    categorized = classify_articles(articles)
+    send_report(categorized)
 
-    # 2단계: 검사
-    reviewed = review_articles(articles)
-
-    # 3단계: 발송
-    send_report(reviewed)
-
-    print("=" * 50)
+    print("=" * 60)
     print(f"완료: {datetime.datetime.now()}")
-    print("=" * 50)
+    print("=" * 60)
