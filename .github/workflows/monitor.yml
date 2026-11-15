@@ -6,6 +6,9 @@ on:
     - cron: '0 23 * * 0-4'
   workflow_dispatch:  # 수동 실행 가능
 
+permissions:
+  contents: write
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -20,8 +23,6 @@ jobs:
 
       - name: 모니터링 실행
         env:
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
