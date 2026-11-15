@@ -49,10 +49,10 @@ def collect_naver_api(keyword: str, display: int = 50) -> list[dict]:
         return []
 
     encoded = urllib.parse.quote(keyword)
-    url = f"https://openapi.naver.com/v1/search/news.json?query={encoded}&display={display}&sort=date"
+    url = f"https://naveropenapi.apigw.ntruss.com/search/v1/news.json?query={encoded}&display={display}&sort=date"
     req = urllib.request.Request(url)
-    req.add_header("X-Naver-Client-Id", NAVER_CLIENT_ID)
-    req.add_header("X-Naver-Client-Secret", NAVER_CLIENT_SECRET)
+    req.add_header("X-NCP-APIGW-API-KEY-ID", NAVER_CLIENT_ID)
+    req.add_header("X-NCP-APIGW-API-KEY", NAVER_CLIENT_SECRET)
 
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
