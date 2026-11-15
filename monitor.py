@@ -153,10 +153,10 @@ def collect_all() -> list[dict]:
 # ═══════════════════════════════════════════
 
 def classify_articles(articles: list[dict]) -> dict:
-    """Claude에게 기사를 보내 4개 카테고리로 분류한다."""
-    empty = {"자사배포": [], "자사언급": [], "경쟁사": [], "업계": []}
+    """Claude에게 기사를 보내 4개 카테고리로 분류한다. 30건씩 배치 처리."""
+    categorized = {"자사배포": [], "자사언급": [], "경쟁사": [], "업계": []}
     if not articles:
-        return empty
+        return categorized
 
     # 이미 보낸 기사 제외
     history = _load_history()
@@ -164,13 +164,31 @@ def classify_articles(articles: list[dict]) -> dict:
 
     if not new_articles:
         print("[분류] 새 기사 없음")
-        return empty
+        return categorized
 
-    new_articles = new_articles[:100]
+    new_articles = new_articles[:120]
     print(f"[분류] {len(new_articles)}건 분석 시작")
 
+    # 30건씩 배치 처리
+    BATCH = 30
+    for batch_start in range(0, len(new_articles), BATCH):
+        batch = new_articles[batch_start:batch_start + BATCH]
+        batch_num = batch_start // BATCH + 1
+        print(f"[분류] 배치 {batch_num}: {len(batch)}건")
+
+        result = _classify_batch(batch)
+        for cat in categorized:
+            categorized[cat].extend(result.get(cat, []))
+
+    for cat, arts in categorized.items():
+        print(f"[분류] {cat}: {len(arts)}건")
+    return categorized
+
+
+def _classify_batch(batch: list[dict]) -> dict:
+    """기사 배치 하나를 Claude로 분류한다."""
     article_text = ""
-    for i, a in enumerate(new_articles, 1):
+    for i, a in enumerate(batch, 1):
         desc = a.get("description", "")[:80]
         article_text += f"[{i}] {a['title']} | 출처: {a['source']} | 검색어: {a['search_keyword']}"
         if desc:
@@ -188,7 +206,7 @@ def classify_articles(articles: list[dict]) -> dict:
 - 업계: K뷰티·화장품 수출·뷰티 트렌드 등 업계 전반
 - 제외: 화장품과 무관, 동명이인(첼리스트 미샤 마이스키 등), 단순 광고
 
-감성(긍정/부정/중립)과 한 줄 요약을 포함해 JSON 배열로 응답:
+감성(긍정/부정/중립)과 한 줄 요약을 포함해 JSON 배열로만 응답하세요. 다른 텍스트 없이 JSON만:
 [{{"index":1,"category":"자사배포","sentiment":"긍정","summary":"요약"}}]"""
 
     try:
@@ -196,28 +214,26 @@ def classify_articles(articles: list[dict]) -> dict:
         start = result.find("[")
         end = result.rfind("]") + 1
         if start < 0 or end <= start:
-            print("[분류] JSON 파싱 실패")
-            return empty
+            print(f"[분류] 배치 JSON 파싱 실패")
+            return {}
 
         analyses = json.loads(result[start:end])
-        categorized = {"자사배포": [], "자사언급": [], "경쟁사": [], "업계": []}
+        cat_result = {"자사배포": [], "자사언급": [], "경쟁사": [], "업계": []}
 
         for item in analyses:
             idx = item.get("index", 0) - 1
             cat = item.get("category", "제외")
-            if 0 <= idx < len(new_articles) and cat in categorized:
-                article = new_articles[idx].copy()
+            if 0 <= idx < len(batch) and cat in cat_result:
+                article = batch[idx].copy()
                 article["sentiment"] = item.get("sentiment", "중립")
                 article["summary"] = item.get("summary", "")
-                categorized[cat].append(article)
+                cat_result[cat].append(article)
 
-        for cat, arts in categorized.items():
-            print(f"[분류] {cat}: {len(arts)}건")
-        return categorized
+        return cat_result
 
     except Exception as e:
-        print(f"[분류] 오류: {e}")
-        return empty
+        print(f"[분류] 배치 오류: {e}")
+        return {}
 
 
 # ═══════════════════════════════════════════
