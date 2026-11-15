@@ -4,7 +4,12 @@ on:
   schedule:
     # 평일 오전 8:00 KST (= UTC 23:00 전날)
     - cron: '0 23 * * 0-4'
-  workflow_dispatch:  # 수동 실행 가능
+  workflow_dispatch:
+    inputs:
+      search_days:
+        description: '검색 기간 (일수, 기본 1)'
+        required: false
+        default: '1'
 
 permissions:
   contents: write
@@ -29,6 +34,7 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          SEARCH_DAYS: ${{ github.event.inputs.search_days || '1' }}
         run: python monitor.py
 
       - name: 발송 이력 저장

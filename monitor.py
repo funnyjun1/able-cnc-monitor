@@ -43,7 +43,7 @@ HISTORY_FILE = "sent_history.json"
 # 1단계: 수집
 # ═══════════════════════════════════════════
 
-def collect_naver_api(keyword: str, display: int = 30) -> list[dict]:
+def collect_naver_api(keyword: str, display: int = 50) -> list[dict]:
     """네이버 뉴스 검색 API로 기사를 수집한다."""
     if not NAVER_CLIENT_ID:
         return []
@@ -81,14 +81,16 @@ def collect_naver_api(keyword: str, display: int = 30) -> list[dict]:
 def collect_google_rss(keyword: str) -> list[dict]:
     """구글 뉴스 RSS로 기사를 수집한다."""
     encoded = urllib.parse.quote(keyword)
-    url = f"https://news.google.com/rss/search?q={encoded}+when:1d&hl=ko&gl=KR&ceid=KR:ko"
+    days = os.environ.get("SEARCH_DAYS", "1")
+    url = f"https://news.google.com/rss/search?q={encoded}+when:{days}d&hl=ko&gl=KR&ceid=KR:ko"
     return _fetch_rss(url, keyword, "google")
 
 
 def collect_daum_rss(keyword: str) -> list[dict]:
     """다음 뉴스를 구글 RSS 경유로 수집한다."""
     encoded = urllib.parse.quote(keyword)
-    url = f"https://news.google.com/rss/search?q={encoded}+site:v.daum.net+when:1d&hl=ko&gl=KR&ceid=KR:ko"
+    days = os.environ.get("SEARCH_DAYS", "1")
+    url = f"https://news.google.com/rss/search?q={encoded}+site:v.daum.net+when:{days}d&hl=ko&gl=KR&ceid=KR:ko"
     return _fetch_rss(url, keyword, "daum")
 
 
