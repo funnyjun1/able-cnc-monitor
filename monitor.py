@@ -228,35 +228,27 @@ def collect_all() -> list[dict]:
     total_keywords = sum(len(kws) for _, kws in keyword_groups)
     print(f"[수집] 총 {total_keywords}개 키워드 검색 시작")
 
-    # 구글 RSS가 GitHub Actions에서 차단될 수 있음 → 첫 호출로 테스트
-    google_ok = True
-    daum_ok = True
-    test_result = collect_google_rss("에이블씨엔씨")
-    if not test_result:
-        print("[수집] ⚠ 구글 뉴스 RSS 연결 불가 — 네이버 API 단독 수집으로 전환")
-        google_ok = False
-        daum_ok = False
-    else:
-        print(f"[수집] 구글 RSS 정상 ({len(test_result)}건)")
-        all_articles.extend(test_result)
+    # 네이버 API 단독 수집 (안정성 최우선)
+    # 구글/다음 RSS는 GitHub Actions IP 차단 리스크가 있어 제거
+    collect_start = time.time()
 
     for group_name, keywords in keyword_groups:
         group_count = 0
         group_start = time.time()
         for idx, kw in enumerate(keywords):
             naver = collect_naver_api(kw)
-            google = collect_google_rss(kw) if google_ok else []
-            daum = collect_daum_rss(kw) if daum_ok else []
-            batch = naver + google + daum
-            all_articles.extend(batch)
-            group_count += len(batch)
+            all_articles.extend(naver)
+            group_count += len(naver)
             # 진행상황 10개마다 출력
             if (idx + 1) % 10 == 0:
                 elapsed = time.time() - group_start
-                print(f"[수집] {group_name}: {idx+1}/{len(keywords)} 완료 ({elapsed:.0f}초)")
-            time.sleep(0.2)
+                print(f"[수집] {group_name}: {idx+1}/{len(keywords)} 완료 ({group_count}건, {elapsed:.0f}초)")
+            time.sleep(0.15)  # API rate limit
         elapsed = time.time() - group_start
         print(f"[수집] {group_name}: {len(keywords)}개 키워드 → {group_count}건 ({elapsed:.0f}초)")
+
+    total_elapsed = time.time() - collect_start
+    print(f"[수집] 전체 수집 완료: {len(all_articles)}건 ({total_elapsed:.0f}초)")
 
     seen = set()
     unique = []
@@ -301,17 +293,22 @@ def classify_articles(articles: list[dict]) -> dict:
         print("[분류] 새 기사 없음")
         return categorized
 
+    # 300건까지 분류 (10배치 × 30건). 이 이상은 노이즈 많음
+    if len(new_articles) > 300:
+        print(f"[분류] {len(new_articles)}건 중 300건만 분석 (나머지 스킵)")
+        new_articles = new_articles[:300]
     print(f"[분류] {len(new_articles)}건 분석 시작")
 
     BATCH = 30
+    total_batches = (len(new_articles) + BATCH - 1) // BATCH
     for batch_start in range(0, len(new_articles), BATCH):
         batch = new_articles[batch_start:batch_start + BATCH]
         batch_num = batch_start // BATCH + 1
-        print(f"[분류] 배치 {batch_num}: {len(batch)}건")
+        print(f"[분류] 배치 {batch_num}/{total_batches}: {len(batch)}건")
         result = _classify_batch(batch)
         for cat in categorized:
             categorized[cat].extend(result.get(cat, []))
-        time.sleep(1)
+        time.sleep(0.5)
 
     for cat, arts in categorized.items():
         print(f"[분류] {cat}: {len(arts)}건")
