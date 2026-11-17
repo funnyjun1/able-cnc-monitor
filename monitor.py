@@ -13,6 +13,7 @@ GitHub Actions 평일 오전 자동 실행
 """
 
 import os
+import sys
 import json
 import hashlib
 import re
@@ -25,6 +26,11 @@ import xml.etree.ElementTree as ET
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from html import unescape
+
+# GitHub Actions에서 print 즉시 출력 (버퍼링 해제)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
 
 # ─── 환경 변수 ───
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -135,7 +141,7 @@ def collect_naver_api(keyword: str, display: int = 50) -> list[dict]:
     req.add_header("X-NCP-APIGW-API-KEY-ID", NAVER_CLIENT_ID)
     req.add_header("X-NCP-APIGW-API-KEY", NAVER_CLIENT_SECRET)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         articles = []
         for item in data.get("items", []):
@@ -170,9 +176,9 @@ def collect_daum_rss(keyword: str) -> list[dict]:
 
 def _fetch_rss(url: str, keyword: str, source: str) -> list[dict]:
     req = urllib.request.Request(url)
-    req.add_header("User-Agent", "Mozilla/5.0")
+    req.add_header("User-Agent", "Mozilla/5.0 (compatible; AbleCNCMonitor/3.0)")
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=8) as resp:
             root = ET.fromstring(resp.read())
         articles = []
         for item in root.findall(".//item"):
@@ -222,17 +228,35 @@ def collect_all() -> list[dict]:
     total_keywords = sum(len(kws) for _, kws in keyword_groups)
     print(f"[수집] 총 {total_keywords}개 키워드 검색 시작")
 
+    # 구글 RSS가 GitHub Actions에서 차단될 수 있음 → 첫 호출로 테스트
+    google_ok = True
+    daum_ok = True
+    test_result = collect_google_rss("에이블씨엔씨")
+    if not test_result:
+        print("[수집] ⚠ 구글 뉴스 RSS 연결 불가 — 네이버 API 단독 수집으로 전환")
+        google_ok = False
+        daum_ok = False
+    else:
+        print(f"[수집] 구글 RSS 정상 ({len(test_result)}건)")
+        all_articles.extend(test_result)
+
     for group_name, keywords in keyword_groups:
         group_count = 0
-        for kw in keywords:
+        group_start = time.time()
+        for idx, kw in enumerate(keywords):
             naver = collect_naver_api(kw)
-            google = collect_google_rss(kw)
-            daum = collect_daum_rss(kw)
+            google = collect_google_rss(kw) if google_ok else []
+            daum = collect_daum_rss(kw) if daum_ok else []
             batch = naver + google + daum
             all_articles.extend(batch)
             group_count += len(batch)
-            time.sleep(0.3)
-        print(f"[수집] {group_name}: {len(keywords)}개 키워드 → {group_count}건")
+            # 진행상황 10개마다 출력
+            if (idx + 1) % 10 == 0:
+                elapsed = time.time() - group_start
+                print(f"[수집] {group_name}: {idx+1}/{len(keywords)} 완료 ({elapsed:.0f}초)")
+            time.sleep(0.2)
+        elapsed = time.time() - group_start
+        print(f"[수집] {group_name}: {len(keywords)}개 키워드 → {group_count}건 ({elapsed:.0f}초)")
 
     seen = set()
     unique = []
