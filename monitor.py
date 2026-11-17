@@ -293,11 +293,36 @@ def classify_articles(articles: list[dict]) -> dict:
         print("[분류] 새 기사 없음")
         return categorized
 
-    # 300건까지 분류 (10배치 × 30건). 이 이상은 노이즈 많음
-    if len(new_articles) > 300:
-        print(f"[분류] {len(new_articles)}건 중 300건만 분석 (나머지 스킵)")
-        new_articles = new_articles[:300]
-    print(f"[분류] {len(new_articles)}건 분석 시작")
+    # 키워드 그룹별 균등 배분 (최대 300건)
+    MAX_TOTAL = 300
+    company_kws = set(COMPANY_KEYWORDS)
+    major_kws = set(COMPETITOR_MAJOR_KEYWORDS)
+    indie_kws = set(COMPETITOR_INDIE_KEYWORDS)
+    industry_kws = set(INDUSTRY_KEYWORDS)
+
+    buckets = {"자사": [], "메이저": [], "인디": [], "업계": []}
+    for a in new_articles:
+        kw = a["search_keyword"]
+        if kw in company_kws:
+            buckets["자사"].append(a)
+        elif kw in major_kws:
+            buckets["메이저"].append(a)
+        elif kw in indie_kws:
+            buckets["인디"].append(a)
+        else:
+            buckets["업계"].append(a)
+
+    # 자사 전부 + 나머지 균등
+    selected = buckets["자사"][:]
+    remaining = MAX_TOTAL - len(selected)
+    per_group = remaining // 3
+    for group in ["메이저", "인디", "업계"]:
+        selected.extend(buckets[group][:per_group])
+    new_articles = selected
+
+    for grp, arts in buckets.items():
+        print(f"[분류] 버킷 {grp}: {len(arts)}건")
+    print(f"[분류] {len(new_articles)}건 분석 시작 (균등 배분)")
 
     BATCH = 30
     total_batches = (len(new_articles) + BATCH - 1) // BATCH
@@ -444,9 +469,9 @@ def send_report(categorized: dict, grouped: dict) -> bool:
     if GDRIVE_SERVICE_ACCOUNT and GDRIVE_FOLDER_ID:
         _upload_to_drive(html, f"데일리모니터링_{today}_통합.html")
 
-    if success:
-        all_arts = [a for v in categorized.values() for a in v]
-        _save_history(all_arts)
+    # 발송 성패 무관하게 이력 저장 (안 그러면 다음 실행 때 중복 분류)
+    all_arts = [a for v in categorized.values() for a in v]
+    _save_history(all_arts)
     return success
 
 
@@ -724,23 +749,33 @@ def _send_email(html: str, subject: str) -> bool:
     if not EMAIL_FROM or not EMAIL_PASSWORD:
         print("[발송] 이메일 설정 없음")
         return False
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = EMAIL_FROM
-        msg["To"] = EMAIL_TO
-        msg.attach(MIMEText(html, "html", "utf-8"))
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(EMAIL_FROM, EMAIL_PASSWORD)
-            server.send_message(msg)
-        print(f"[발송] 완료: {subject}")
-        return True
-    except Exception as e:
-        print(f"[발송] 오류: {e}")
-        return False
+
+    print(f"[발송] HTML 크기: {len(html.encode('utf-8')):,} bytes")
+
+    # 복수 수신자 지원 (쉼표 구분)
+    recipients = [addr.strip() for addr in EMAIL_TO.split(",") if addr.strip()]
+
+    for attempt in range(3):  # 최대 3회 재시도
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = EMAIL_FROM
+            msg["To"] = ", ".join(recipients)
+            msg.attach(MIMEText(html, "html", "utf-8"))
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(EMAIL_FROM, EMAIL_PASSWORD)
+                server.send_message(msg)
+            print(f"[발송] 완료: {subject}")
+            return True
+        except Exception as e:
+            print(f"[발송] 시도 {attempt+1}/3 실패: {e}")
+            if attempt < 2:
+                time.sleep(3)
+    print("[발송] 3회 시도 모두 실패")
+    return False
 
 
 # ═══════════════════════════════════════════
