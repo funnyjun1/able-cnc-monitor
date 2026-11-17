@@ -762,10 +762,8 @@ def _send_email(html: str, subject: str) -> bool:
             msg["From"] = EMAIL_FROM
             msg["To"] = ", ".join(recipients)
             msg.attach(MIMEText(html, "html", "utf-8"))
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
+            # SSL(465) 사용 — GitHub Actions에서 STARTTLS(587) 차단 사례 있음
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
                 server.login(EMAIL_FROM, EMAIL_PASSWORD)
                 server.send_message(msg)
             print(f"[발송] 완료: {subject}")
