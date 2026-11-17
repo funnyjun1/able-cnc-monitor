@@ -746,8 +746,15 @@ PR 대행사 대표가 CEO에게 아침 보고하는 핵심 인사이트를 작�
         return ""
 
 def _send_email(html: str, subject: str) -> bool:
-    if not EMAIL_FROM or not EMAIL_PASSWORD:
-        print("[발송] 이메일 설정 없음")
+    """Gmail API(REST)로 이메일을 발송한다. SMTP는 GitHub Actions에서 차단됨."""
+    import base64
+
+    gmail_token = os.environ.get("GMAIL_REFRESH_TOKEN", "")
+    gmail_client_id = os.environ.get("GMAIL_CLIENT_ID", "")
+    gmail_client_secret = os.environ.get("GMAIL_CLIENT_SECRET", "")
+
+    if not EMAIL_FROM:
+        print("[발송] EMAIL_FROM 없음")
         return False
 
     print(f"[발송] HTML 크기: {len(html.encode('utf-8')):,} bytes")
@@ -755,24 +762,89 @@ def _send_email(html: str, subject: str) -> bool:
     # 복수 수신자 지원 (쉼표 구분)
     recipients = [addr.strip() for addr in EMAIL_TO.split(",") if addr.strip()]
 
-    for attempt in range(3):  # 최대 3회 재시도
+    # 방법 1: Gmail API (OAuth refresh token)
+    if gmail_token and gmail_client_id and gmail_client_secret:
+        return _send_via_gmail_api(html, subject, recipients, gmail_token,
+                                    gmail_client_id, gmail_client_secret)
+
+    # 방법 2: SMTP 폴백 (로컬 환경용)
+    if EMAIL_PASSWORD:
+        return _send_via_smtp(html, subject, recipients)
+
+    print("[발송] 발송 수단 없음 (GMAIL_REFRESH_TOKEN 또는 EMAIL_PASSWORD 필요)")
+    return False
+
+
+def _send_via_gmail_api(html, subject, recipients, refresh_token, client_id, client_secret):
+    """Gmail API REST로 이메일을 발송한다."""
+    import base64
+
+    # 1. refresh token으로 access token 획득
+    token_data = urllib.parse.urlencode({
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }).encode()
+
+    try:
+        req = urllib.request.Request("https://oauth2.googleapis.com/token",
+                                     data=token_data, method="POST")
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            token_resp = json.loads(resp.read().decode("utf-8"))
+        access_token = token_resp["access_token"]
+    except Exception as e:
+        print(f"[발송] Gmail API 토큰 오류: {e}")
+        return False
+
+    # 2. MIME 메시지 생성
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_FROM
+    msg["To"] = ", ".join(recipients)
+    msg.attach(MIMEText(html, "html", "utf-8"))
+
+    raw_msg = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+
+    # 3. Gmail API로 발송
+    try:
+        send_data = json.dumps({"raw": raw_msg}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            data=send_data, method="POST",
+        )
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            print(f"[발송] Gmail API 완료: {result.get('id')} | {subject}")
+            return True
+    except Exception as e:
+        print(f"[발송] Gmail API 발송 오류: {e}")
+        return False
+
+
+def _send_via_smtp(html, subject, recipients):
+    """SMTP로 이메일을 발송한다 (로컬 환경 폴백)."""
+    for attempt in range(3):
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
             msg["From"] = EMAIL_FROM
             msg["To"] = ", ".join(recipients)
             msg.attach(MIMEText(html, "html", "utf-8"))
-            # SSL(465) 사용 — GitHub Actions에서 STARTTLS(587) 차단 사례 있음
             with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
                 server.login(EMAIL_FROM, EMAIL_PASSWORD)
                 server.send_message(msg)
-            print(f"[발송] 완료: {subject}")
+            print(f"[발송] SMTP 완료: {subject}")
             return True
         except Exception as e:
-            print(f"[발송] 시도 {attempt+1}/3 실패: {e}")
+            print(f"[발송] SMTP 시도 {attempt+1}/3 실패: {e}")
             if attempt < 2:
                 time.sleep(3)
-    print("[발송] 3회 시도 모두 실패")
+    print("[발송] SMTP 3회 모두 실패")
     return False
 
 
