@@ -1,19 +1,22 @@
 """
-에이블씨엔씨 뉴스 모니터링 시스템 v2
-수집(네이버 API + 구글 RSS + 다음 RSS) → 분류(Claude) → 발송(이메일)
-GitHub Actions에서 평일 아침 자동 실행
+에이블씨엔씨 뉴스 모니터링 시스템 v3
+가이드 기준: 100+ 키워드, 매체 티어, 대표 1건+외 N건, Google Drive 업로드
+GitHub Actions 평일 오전 자동 실행
 
 카테고리:
-  - 자사 배포: 에이블씨엔씨/미샤가 주요 소재인 기사
-  - 자사 언급: 에이블씨엔씨/미샤가 짧게 언급된 기사
-  - 경쟁사: 달바글로벌, 스킨푸드, 아모레퍼시픽, LG생활건강 등
-  - 업계: K뷰티, 화장품 업계 전반
+  - 자사배포: 에이블씨엔씨/미샤 등이 주요 소재인 기사
+  - 자사언급: 에이블씨엔씨/미샤 등이 짧게 언급된 기사
+  - 경쟁사메이저: 메이저 경쟁사 단일 브랜드 중심 기사
+  - 경쟁사인디: 인디 경쟁사 단일 브랜드 중심 기사
+  - 업계: K뷰티/화장품 업계 전반, 복수 브랜드 나열 기사
+  - 제외: 무관 기사
 """
 
 import os
 import json
 import hashlib
 import re
+import time
 import datetime
 import smtplib
 import urllib.request
@@ -30,13 +33,93 @@ NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "")
 EMAIL_TO = os.environ.get("EMAIL_TO", "")
-
-# ─── 키워드 설정 ───
-COMPANY_KEYWORDS = ["에이블씨엔씨", "미샤", "MISSHA", "어퓨", "초공진"]
-COMPETITOR_KEYWORDS = ["달바글로벌", "스킨푸드", "아모레퍼시픽", "LG생활건강", "에이피알"]
-INDUSTRY_KEYWORDS = ["K뷰티", "K-뷰티", "화장품 수출", "뷰티 업계"]
+GDRIVE_SERVICE_ACCOUNT = os.environ.get("GDRIVE_SERVICE_ACCOUNT", "")
+GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID", "")
 
 HISTORY_FILE = "sent_history.json"
+
+# ═══════════════════════════════════════════
+# 키워드 설정 (가이드 2장 기준)
+# ═══════════════════════════════════════════
+
+COMPANY_KEYWORDS = [
+    "에이블씨엔씨", "미샤", "MISSHA", "어퓨", "초공진", "셀라피", "apieu",
+]
+
+FASHION_EXCLUDE = [
+    "착장", "코트", "하객룩", "하객", "패션", "스타일링", "룩북", "코디",
+    "아우터", "원피스", "자켓", "니트", "패딩", "미샤 마이스키",
+    "첼리스트", "첼리스트 미샤",
+]
+
+COMPETITOR_MAJOR_KEYWORDS = [
+    "아모레퍼시픽", "설화수", "라네즈", "헤라", "프리메라", "아이오페",
+    "마몽드", "한율", "비레디", "일리윤", "에스쁘아", "에스트라",
+    "코스알엑스", "미쟝센",
+    "LG생활건강", "더후", "CNP", "빌리프", "닥터그루트", "VDL",
+    "피지오겔", "프라엘",
+    "애경산업", "루나", "에이지투웨니스",
+    "이니스프리", "더페이스샵", "에뛰드", "네이처리퍼블릭",
+    "토니모리",
+    "클리오", "트윙클팝", "구달", "페리페라",
+    "잇츠한불", "AHC",
+]
+
+COMPETITOR_INDIE_KEYWORDS = [
+    "에이피알", "메디큐브", "에이프릴스킨",
+    "구다이글로벌", "조선미녀", "티르티르", "스킨푸드", "라운드랩", "스킨1004",
+    "더파운더즈", "아누아",
+    "브이티",
+    "달바글로벌",
+    "닥터지",
+    "아이패밀리에스씨", "롬앤", "누즈",
+    "비나우", "넘버즈인", "퓌",
+    "아임프롬",
+    "엘앤피", "메디힐",
+    "올리브인터내셔널", "밀크터치",
+    "파켓", "믹순",
+    "포컴퍼니", "아비브",
+    "토리든",
+    "정샘물뷰티",
+    "모먼츠", "비플레인",
+    "스타일난다", "3CE",
+    "브랜드501", "닥터멜락신",
+    "바이오던스",
+    "바이오힐보",
+    "닥터엘시아",
+    "아로마티카",
+    "톤28",
+]
+
+INDUSTRY_KEYWORDS = [
+    "화장품", "뷰티", "올리브영", "다이소 뷰티", "무신사 뷰티",
+    "레디영약국", "홍익약국", "오프뷰티",
+    "코스맥스", "한국콜마", "코스메카",
+    "실리콘투",
+    "식약처 화장품", "소비자원 화장품",
+]
+
+# ═══════════════════════════════════════════
+# 매체 티어 (가이드 5장 기준, T1 = 31개)
+# ═══════════════════════════════════════════
+
+T1_MEDIA = {
+    "연합뉴스", "뉴시스", "뉴스1",
+    "조선일보", "중앙일보", "동아일보", "한국일보", "경향신문", "한겨레",
+    "매일경제", "한국경제", "서울경제", "이데일리", "헤럴드경제",
+    "파이낸셜뉴스", "아시아경제", "머니투데이", "더벨",
+    "조선비즈", "중앙일보 조인스", "한경비즈니스",
+    "KBS", "MBC", "SBS", "YTN", "JTBC", "MBN", "채널A", "TV조선",
+    "연합뉴스TV", "KBS NEWS",
+}
+
+def get_media_tier(source_name: str) -> int:
+    if not source_name:
+        return 1
+    for t1 in T1_MEDIA:
+        if t1 in source_name or source_name in t1:
+            return 5
+    return 2
 
 
 # ═══════════════════════════════════════════
@@ -44,20 +127,16 @@ HISTORY_FILE = "sent_history.json"
 # ═══════════════════════════════════════════
 
 def collect_naver_api(keyword: str, display: int = 50) -> list[dict]:
-    """네이버 뉴스 검색 API로 기사를 수집한다."""
     if not NAVER_CLIENT_ID:
         return []
-
     encoded = urllib.parse.quote(keyword)
     url = f"https://naverapihub.apigw.ntruss.com/search/v1/news?query={encoded}&display={display}&sort=date"
     req = urllib.request.Request(url)
     req.add_header("X-NCP-APIGW-API-KEY-ID", NAVER_CLIENT_ID)
     req.add_header("X-NCP-APIGW-API-KEY", NAVER_CLIENT_SECRET)
-
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-
         articles = []
         for item in data.get("items", []):
             title = _strip_html(item.get("title", ""))
@@ -65,11 +144,8 @@ def collect_naver_api(keyword: str, display: int = 50) -> list[dict]:
             desc = _strip_html(item.get("description", ""))
             pub_date = item.get("pubDate", "")
             articles.append({
-                "title": title,
-                "link": link,
-                "description": desc,
-                "pub_date": pub_date,
-                "source": "naver",
+                "title": title, "link": link, "description": desc,
+                "pub_date": pub_date, "source": _extract_media_name(link),
                 "search_keyword": keyword,
             })
         return articles
@@ -79,7 +155,6 @@ def collect_naver_api(keyword: str, display: int = 50) -> list[dict]:
 
 
 def collect_google_rss(keyword: str) -> list[dict]:
-    """구글 뉴스 RSS로 기사를 수집한다."""
     encoded = urllib.parse.quote(keyword)
     days = os.environ.get("SEARCH_DAYS", "1")
     url = f"https://news.google.com/rss/search?q={encoded}+when:{days}d&hl=ko&gl=KR&ceid=KR:ko"
@@ -87,7 +162,6 @@ def collect_google_rss(keyword: str) -> list[dict]:
 
 
 def collect_daum_rss(keyword: str) -> list[dict]:
-    """다음 뉴스를 구글 RSS 경유로 수집한다."""
     encoded = urllib.parse.quote(keyword)
     days = os.environ.get("SEARCH_DAYS", "1")
     url = f"https://news.google.com/rss/search?q={encoded}+site:v.daum.net+when:{days}d&hl=ko&gl=KR&ceid=KR:ko"
@@ -95,10 +169,8 @@ def collect_daum_rss(keyword: str) -> list[dict]:
 
 
 def _fetch_rss(url: str, keyword: str, source: str) -> list[dict]:
-    """RSS URL에서 기사를 가져온다."""
     req = urllib.request.Request(url)
     req.add_header("User-Agent", "Mozilla/5.0")
-
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             root = ET.fromstring(resp.read())
@@ -109,11 +181,8 @@ def _fetch_rss(url: str, keyword: str, source: str) -> list[dict]:
             pub_date = item.findtext("pubDate", "")
             src = item.findtext("source", "") or source
             articles.append({
-                "title": title,
-                "link": link,
-                "description": "",
-                "pub_date": pub_date,
-                "source": src,
+                "title": title, "link": link, "description": "",
+                "pub_date": pub_date, "source": src,
                 "search_keyword": keyword,
             })
         return articles
@@ -122,22 +191,49 @@ def _fetch_rss(url: str, keyword: str, source: str) -> list[dict]:
         return []
 
 
+def _extract_media_name(url: str) -> str:
+    try:
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc
+        domain_map = {
+            "www.yna.co.kr": "연합뉴스", "www.newsis.com": "뉴시스",
+            "www.news1.kr": "뉴스1", "www.chosun.com": "조선일보",
+            "www.joongang.co.kr": "중앙일보", "www.donga.com": "동아일보",
+            "www.hankookilbo.com": "한국일보", "www.khan.co.kr": "경향신문",
+            "www.hani.co.kr": "한겨레", "www.mk.co.kr": "매일경제",
+            "www.hankyung.com": "한국경제", "www.sedaily.com": "서울경제",
+            "www.edaily.co.kr": "이데일리", "biz.heraldcorp.com": "헤럴드경제",
+            "www.fnnews.com": "파이낸셜뉴스", "www.asiae.co.kr": "아시아경제",
+            "news.mt.co.kr": "머니투데이", "www.thebell.co.kr": "더벨",
+        }
+        return domain_map.get(domain, domain.replace("www.", "").split(".")[0])
+    except Exception:
+        return "unknown"
+
+
 def collect_all() -> list[dict]:
-    """모든 소스에서 기사를 수집하고 중복을 제거한다."""
     all_articles = []
-    all_keywords = COMPANY_KEYWORDS + COMPETITOR_KEYWORDS + INDUSTRY_KEYWORDS
+    keyword_groups = [
+        ("자사", COMPANY_KEYWORDS),
+        ("메이저경쟁사", COMPETITOR_MAJOR_KEYWORDS),
+        ("인디경쟁사", COMPETITOR_INDIE_KEYWORDS),
+        ("업계", INDUSTRY_KEYWORDS),
+    ]
+    total_keywords = sum(len(kws) for _, kws in keyword_groups)
+    print(f"[수집] 총 {total_keywords}개 키워드 검색 시작")
 
-    for kw in all_keywords:
-        naver = collect_naver_api(kw)
-        all_articles.extend(naver)
-        google = collect_google_rss(kw)
-        all_articles.extend(google)
-        daum = collect_daum_rss(kw)
-        all_articles.extend(daum)
-        total_kw = len(naver) + len(google) + len(daum)
-        print(f"[수집] '{kw}': 네이버 {len(naver)} + 구글 {len(google)} + 다음 {len(daum)} = {total_kw}건")
+    for group_name, keywords in keyword_groups:
+        group_count = 0
+        for kw in keywords:
+            naver = collect_naver_api(kw)
+            google = collect_google_rss(kw)
+            daum = collect_daum_rss(kw)
+            batch = naver + google + daum
+            all_articles.extend(batch)
+            group_count += len(batch)
+            time.sleep(0.3)
+        print(f"[수집] {group_name}: {len(keywords)}개 키워드 → {group_count}건")
 
-    # 중복 제거 (제목 기준 해시)
     seen = set()
     unique = []
     for a in all_articles:
@@ -146,8 +242,20 @@ def collect_all() -> list[dict]:
             seen.add(key)
             unique.append(a)
 
-    print(f"[수집] 총 {len(all_articles)}건 → 중복 제거 후 {len(unique)}건")
-    return unique
+    filtered = _filter_fashion_missha(unique)
+    print(f"[수집] 총 {len(all_articles)}건 → 중복제거 {len(unique)}건 → 패션필터 후 {len(filtered)}건")
+    return filtered
+
+
+def _filter_fashion_missha(articles: list[dict]) -> list[dict]:
+    result = []
+    for a in articles:
+        if a["search_keyword"] in ("미샤", "MISSHA", "missha"):
+            text = (a["title"] + " " + a.get("description", "")).lower()
+            if any(excl in text for excl in FASHION_EXCLUDE):
+                continue
+        result.append(a)
+    return result
 
 
 # ═══════════════════════════════════════════
@@ -155,32 +263,31 @@ def collect_all() -> list[dict]:
 # ═══════════════════════════════════════════
 
 def classify_articles(articles: list[dict]) -> dict:
-    """Claude에게 기사를 보내 4개 카테고리로 분류한다. 30건씩 배치 처리."""
-    categorized = {"자사배포": [], "자사언급": [], "경쟁사": [], "업계": []}
+    categorized = {
+        "자사배포": [], "자사언급": [],
+        "경쟁사메이저": [], "경쟁사인디": [],
+        "업계": [],
+    }
     if not articles:
         return categorized
 
-    # 이미 보낸 기사 제외
     history = _load_history()
     new_articles = [a for a in articles if _article_hash(a["title"]) not in history]
-
     if not new_articles:
         print("[분류] 새 기사 없음")
         return categorized
 
-    new_articles = new_articles[:120]
     print(f"[분류] {len(new_articles)}건 분석 시작")
 
-    # 30건씩 배치 처리
     BATCH = 30
     for batch_start in range(0, len(new_articles), BATCH):
         batch = new_articles[batch_start:batch_start + BATCH]
         batch_num = batch_start // BATCH + 1
         print(f"[분류] 배치 {batch_num}: {len(batch)}건")
-
         result = _classify_batch(batch)
         for cat in categorized:
             categorized[cat].extend(result.get(cat, []))
+        time.sleep(1)
 
     for cat, arts in categorized.items():
         print(f"[분류] {cat}: {len(arts)}건")
@@ -188,11 +295,13 @@ def classify_articles(articles: list[dict]) -> dict:
 
 
 def _classify_batch(batch: list[dict]) -> dict:
-    """기사 배치 하나를 Claude로 분류한다."""
+    major_str = ", ".join(COMPETITOR_MAJOR_KEYWORDS[:20]) + " 등"
+    indie_str = ", ".join(COMPETITOR_INDIE_KEYWORDS[:20]) + " 등"
+
     article_text = ""
     for i, a in enumerate(batch, 1):
         desc = a.get("description", "")[:80]
-        article_text += f"[{i}] {a['title']} | 출처: {a['source']} | 검색어: {a['search_keyword']}"
+        article_text += f"[{i}] {a['title']} | 매체: {a['source']} | 검색어: {a['search_keyword']}"
         if desc:
             article_text += f" | {desc}"
         article_text += "\n"
@@ -201,27 +310,35 @@ def _classify_batch(batch: list[dict]) -> dict:
 
 {article_text}
 
-각 기사를 아래 5개 카테고리 중 하나로 분류하세요:
-- 자사배포: 에이블씨엔씨·미샤(MISSHA)·어퓨·초공진이 기사의 주요 소재
-- 자사언급: 에이블씨엔씨·미샤가 여러 브랜드 중 하나로 짧게 언급
-- 경쟁사: 달바글로벌·스킨푸드·아모레퍼시픽·LG생활건강·에이피알 등이 주요 소재
-- 업계: K뷰티·화장품 수출·뷰티 트렌드 등 업계 전반
-- 제외: 화장품과 무관, 동명이인(첼리스트 미샤 마이스키 등), 단순 광고
+각 기사를 아래 6개 카테고리 중 하나로 분류하세요:
 
-감성(긍정/부정/중립)과 한 줄 요약을 포함해 JSON 배열로만 응답하세요. 다른 텍스트 없이 JSON만:
-[{{"index":1,"category":"자사배포","sentiment":"긍정","summary":"요약"}}]"""
+- **자사배포**: 에이블씨엔씨·미샤(MISSHA)·어퓨·초공진·셀라피가 기사의 주요 소재
+- **자사언급**: 에이블씨엔씨·미샤 등이 본문에서 짧게 거론 (뷰티 맥락일 때만)
+- **경쟁사메이저**: 다음 브랜드가 단일 주요 소재인 기사: {major_str}
+- **경쟁사인디**: 다음 브랜드가 단일 주요 소재인 기사: {indie_str}
+- **업계**: 복수 브랜드 나열 기사, K뷰티·화장품·유통·플랫폼 기사
+- **제외**: 화장품과 무관, 패션 맥락의 미샤, 동명이인, 단순 광고
+
+**규칙:**
+- 단일 브랜드 중심 기사만 경쟁사로 분류
+- 복수 브랜드 나열 → 무조건 업계
+- 곁다리 언급 → 제외
+
+JSON 배열로만 응답:
+[{{"index":1,"category":"자사배포","sentiment":"긍정","summary":"한줄요약"}}]"""
 
     try:
         result = _call_claude(prompt)
         start = result.find("[")
         end = result.rfind("]") + 1
         if start < 0 or end <= start:
-            print(f"[분류] 배치 JSON 파싱 실패")
             return {}
-
         analyses = json.loads(result[start:end])
-        cat_result = {"자사배포": [], "자사언급": [], "경쟁사": [], "업계": []}
-
+        cat_result = {
+            "자사배포": [], "자사언급": [],
+            "경쟁사메이저": [], "경쟁사인디": [],
+            "업계": [],
+        }
         for item in analyses:
             idx = item.get("index", 0) - 1
             cat = item.get("category", "제외")
@@ -229,45 +346,93 @@ def _classify_batch(batch: list[dict]) -> dict:
                 article = batch[idx].copy()
                 article["sentiment"] = item.get("sentiment", "중립")
                 article["summary"] = item.get("summary", "")
+                article["tier_score"] = get_media_tier(article["source"])
                 cat_result[cat].append(article)
-
         return cat_result
-
     except Exception as e:
         print(f"[분류] 배치 오류: {e}")
         return {}
 
 
 # ═══════════════════════════════════════════
+# 2.5단계: 그루핑 (대표 1건 + 외 N건)
+# ═══════════════════════════════════════════
+
+def group_similar_articles(categorized: dict) -> dict:
+    grouped = {}
+    for cat, articles in categorized.items():
+        if not articles:
+            grouped[cat] = []
+            continue
+        groups = []
+        used = set()
+        for i, a in enumerate(articles):
+            if i in used:
+                continue
+            group = [a]
+            used.add(i)
+            for j, b in enumerate(articles):
+                if j in used:
+                    continue
+                if _is_similar(a["title"], b["title"]):
+                    group.append(b)
+                    used.add(j)
+            group.sort(key=lambda x: x.get("tier_score", 1), reverse=True)
+            representative = group[0]
+            representative["others_count"] = len(group) - 1
+            groups.append(representative)
+        grouped[cat] = groups
+    return grouped
+
+
+def _is_similar(title_a: str, title_b: str) -> bool:
+    words_a = set(re.findall(r"[가-힣]+", title_a))
+    words_b = set(re.findall(r"[가-힣]+", title_b))
+    if not words_a or not words_b:
+        return False
+    overlap = len(words_a & words_b)
+    min_len = min(len(words_a), len(words_b))
+    if min_len == 0:
+        return False
+    return overlap / min_len >= 0.6
+
+
+# ═══════════════════════════════════════════
 # 3단계: 발송
 # ═══════════════════════════════════════════
 
-def send_report(categorized: dict) -> bool:
-    """분류된 기사를 HTML 이메일로 발송한다."""
+def send_report(categorized: dict, grouped: dict) -> bool:
     today = datetime.date.today().strftime("%Y-%m-%d")
     weekday = ["월", "화", "수", "목", "금", "토", "일"][datetime.date.today().weekday()]
     total = sum(len(v) for v in categorized.values())
 
     summary_text = _generate_summary(categorized) if total > 0 else ""
-
-    html = _build_html(today, weekday, total, summary_text, categorized)
+    html = _build_html(today, weekday, total, summary_text, grouped, categorized)
 
     parts = []
+    label_map = {"자사배포": "배포", "자사언급": "언급", "경쟁사메이저": "메이저",
+                 "경쟁사인디": "인디", "업계": "업계"}
     for k, v in categorized.items():
         if v:
-            parts.append(f"{k} {len(v)}")
+            parts.append(f"{label_map.get(k, k)} {len(v)}")
     detail = ", ".join(parts) if parts else "기사 없음"
     subject = f"[에이블씨엔씨] 뉴스 모니터링 — {today} ({weekday}) | {detail}"
 
     success = _send_email(html, subject)
+
+    if GDRIVE_SERVICE_ACCOUNT and GDRIVE_FOLDER_ID:
+        _upload_to_drive(html, f"데일리모니터링_{today}_통합.html")
+
     if success:
         all_arts = [a for v in categorized.values() for a in v]
         _save_history(all_arts)
     return success
 
 
-def _build_html(today, weekday, total, summary_text, categorized):
-    """이메일 HTML 본문을 생성한다."""
+def _build_html(today, weekday, total, summary_text, grouped, categorized):
+    label_map = {"자사배포": "배포", "자사언급": "언급", "경쟁사메이저": "메이저",
+                 "경쟁사인디": "인디", "업계": "업계"}
+
     html = f"""<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <title>ABLE C&amp;C DAILY MONITORING {today}</title></head>
@@ -282,9 +447,21 @@ def _build_html(today, weekday, total, summary_text, categorized):
 <tr><td style="vertical-align:bottom;">
 <span style="font-size:20px;font-weight:bold;color:#C25A00;">{today.replace('-', '. ')} ({weekday})</span>
 </td><td align="right" style="vertical-align:bottom;font-size:12.5px;color:#857B6F;font-weight:bold;">
-GitHub Actions 자동 수집 · AI 분류
+GitHub Actions · AI 분류 · v3
 </td></tr></table>
 </td></tr>"""
+
+    stats_parts = []
+    for cat, arts in categorized.items():
+        if arts:
+            stats_parts.append(f"{label_map.get(cat, cat)} {len(arts)}")
+    stats_str = " · ".join(stats_parts) if stats_parts else "수집 기사 없음"
+
+    html += f"""<tr><td style="padding:10px 0 0 0;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F5EFE6;border:1px solid #E5DACB;">
+<tr><td style="padding:8px 14px;font-size:12.5px;color:#6B5F52;">
+총 <b>{total}</b>건 | {stats_str}
+</td></tr></table></td></tr>"""
 
     if total == 0:
         html += """<tr><td style="padding:20px 0;">
@@ -300,55 +477,152 @@ GitHub Actions 자동 수집 · AI 분류
 </td></tr></table></td></tr>"""
 
         sections = [
-            ("자사배포", "1", "자사 배포"),
-            ("자사언급", "2", "자사 언급"),
-            ("경쟁사", "3", "경쟁사"),
-            ("업계", "4", "업계·트렌드"),
+            ("자사배포", "1", "자사 배포", "#E8730C"),
+            ("자사언급", "2", "자사 언급", "#C25A00"),
+            ("경쟁사메이저", "3", "경쟁사 — 메이저", "#2E86AB"),
+            ("경쟁사인디", "4", "경쟁사 — 인디", "#5BA4CF"),
+            ("업계", "5", "화장품 업계 · 트렌드", "#6B5F52"),
         ]
 
-        for cat_key, num, label in sections:
-            arts = categorized[cat_key]
+        for cat_key, num, label, color in sections:
+            arts = grouped.get(cat_key, [])
+            orig_count = len(categorized.get(cat_key, []))
             if not arts:
                 continue
-            html += _build_section(num, f"{label} ({len(arts)}건)", arts)
+            html += _build_section(num, f"{label} ({orig_count}건)", arts, color)
 
     html += f"""<tr><td style="padding:16px 0 0 0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E5DACB;">
 <tr><td align="center" style="padding:12px 15px;font-size:11.5px;color:#857B6F;">
 Monitoring by <b style="color:#2B2620;">프라우드컴(주)</b> · Copyright 2026 Proudcomm<br>
-<span style="font-size:10px;color:#aaa;">네이버 API + 구글 RSS + 다음 | Claude AI 분류</span>
+<span style="font-size:10px;color:#aaa;">네이버 API + 구글 RSS + 다음 | Claude AI 분류 | v3</span>
 </td></tr></table></td></tr>
 
 </table></td></tr></table></body></html>"""
     return html
 
 
-def _build_section(num: str, label: str, articles: list[dict]) -> str:
-    """하나의 카테고리 섹션 HTML을 만든다."""
+def _build_section(num, label, articles, accent_color):
     s = f"""<tr><td style="padding:14px 0 0 0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFFFF;border:1px solid #ECE3D8;">
 <tr><td style="padding:16px 18px;">
 <div style="font-size:16px;font-weight:bold;color:#2B2620;padding-bottom:6px;">
-<span style="color:#E8730C;">{num}</span> &nbsp;&nbsp;{label}</div>"""
+<span style="color:{accent_color};">{num}</span> &nbsp;&nbsp;{label}</div>"""
 
     sentiment_colors = {"긍정": "#28a745", "부정": "#dc3545", "중립": "#6c757d"}
+    tier_badges = {5: ("T1", "#E8730C"), 3: ("T2", "#6B5F52"), 2: ("T3", "#999"), 1: ("T4", "#bbb")}
 
     for a in articles:
         sentiment = a.get("sentiment", "중립")
-        color = sentiment_colors.get(sentiment, "#6c757d")
+        s_color = sentiment_colors.get(sentiment, "#6c757d")
         title = a["title"]
         link = a["link"]
         source = a["source"]
         summary = a.get("summary", "")
+        tier_score = a.get("tier_score", 1)
+        others = a.get("others_count", 0)
+        tier_label, tier_color = tier_badges.get(tier_score, ("T4", "#bbb"))
+        others_html = f' <span style="color:#C25A00;font-size:11px;">외 {others}건</span>' if others > 0 else ""
 
         s += f"""<div style="font-size:14px;padding:7px 0;border-top:1px solid #F2ECE3;">
-<span style="display:inline-block;background:{color};color:white;padding:1px 6px;border-radius:3px;font-size:11px;">{sentiment}</span>&nbsp;
-<a href="{link}" style="color:#2B2620;text-decoration:none;font-weight:bold;">{title}</a>
+<span style="display:inline-block;background:{s_color};color:white;padding:1px 6px;border-radius:3px;font-size:10px;">{sentiment}</span>
+<span style="display:inline-block;background:{tier_color};color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:2px;">{tier_label}</span>&nbsp;
+<a href="{link}" style="color:#2B2620;text-decoration:none;font-weight:bold;">{title}</a>{others_html}
 <span style="color:#C25A00;font-size:11px;font-weight:bold;"> {source} ›</span>
 <br><span style="color:#857B6F;font-size:12px;">{summary}</span></div>"""
 
     s += "</td></tr></table></td></tr>"
     return s
+
+
+# ═══════════════════════════════════════════
+# Google Drive 업로드
+# ═══════════════════════════════════════════
+
+def _upload_to_drive(html_content: str, filename: str):
+    try:
+        import base64
+        sa_info = json.loads(base64.b64decode(GDRIVE_SERVICE_ACCOUNT))
+        token = _get_drive_token(sa_info)
+        if not token:
+            print("[Drive] 토큰 발급 실패")
+            return
+
+        boundary = "----DriveUploadBoundary"
+        metadata = json.dumps({
+            "name": filename,
+            "parents": [GDRIVE_FOLDER_ID],
+            "mimeType": "text/html",
+        })
+        body = (
+            f"--{boundary}\r\n"
+            f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+            f"{metadata}\r\n"
+            f"--{boundary}\r\n"
+            f"Content-Type: text/html; charset=UTF-8\r\n\r\n"
+            f"{html_content}\r\n"
+            f"--{boundary}--"
+        ).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+            data=body, method="POST",
+        )
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", f"multipart/related; boundary={boundary}")
+
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            print(f"[Drive] 업로드 완료: {result.get('name')} (id: {result.get('id')})")
+    except Exception as e:
+        print(f"[Drive] 업로드 오류: {e}")
+
+
+def _get_drive_token(sa_info: dict) -> str:
+    try:
+        import base64
+        import subprocess
+        import tempfile
+
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256", "typ": "JWT"}).encode()).rstrip(b"=")
+        now = int(time.time())
+        claim = base64.urlsafe_b64encode(json.dumps({
+            "iss": sa_info["client_email"],
+            "scope": "https://www.googleapis.com/auth/drive.file",
+            "aud": "https://oauth2.googleapis.com/token",
+            "iat": now, "exp": now + 3600,
+        }).encode()).rstrip(b"=")
+
+        sign_input = header + b"." + claim
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False) as f:
+            f.write(sa_info["private_key"])
+            key_path = f.name
+        try:
+            result = subprocess.run(
+                ["openssl", "dgst", "-sha256", "-sign", key_path],
+                input=sign_input, capture_output=True,
+            )
+            signature = base64.urlsafe_b64encode(result.stdout).rstrip(b"=")
+        finally:
+            os.unlink(key_path)
+
+        jwt_token = sign_input + b"." + signature
+        token_data = urllib.parse.urlencode({
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": jwt_token.decode(),
+        }).encode()
+
+        req = urllib.request.Request(
+            "https://oauth2.googleapis.com/token",
+            data=token_data, method="POST",
+        )
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data.get("access_token", "")
+    except Exception as e:
+        print(f"[Drive] 토큰 오류: {e}")
+        return ""
 
 
 # ═══════════════════════════════════════════
@@ -359,12 +633,10 @@ def _strip_html(text: str) -> str:
     clean = re.sub(r"<[^>]+>", "", text)
     return unescape(clean).strip()
 
-
 def _article_hash(title: str) -> str:
     clean = re.sub(r"^\[.*?\]\s*", "", title)
     clean = re.sub(r"\s+", "", clean)[:50]
     return hashlib.md5(clean.encode("utf-8")).hexdigest()[:12]
-
 
 def _load_history() -> set:
     if not os.path.exists(HISTORY_FILE):
@@ -376,15 +648,13 @@ def _load_history() -> set:
     except Exception:
         return set()
 
-
 def _save_history(articles: list[dict]):
     history = _load_history()
     for a in articles:
         history.add(_article_hash(a["title"]))
-    hashes = list(history)[-1000:]
+    hashes = list(history)[-2000:]
     with open(HISTORY_FILE, "w") as f:
         json.dump({"hashes": hashes, "updated": str(datetime.datetime.now())}, f)
-
 
 def _call_claude(prompt: str) -> str:
     url = "https://api.anthropic.com/v1/messages"
@@ -393,45 +663,41 @@ def _call_claude(prompt: str) -> str:
         "max_tokens": 8192,
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
-
     req = urllib.request.Request(url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
     req.add_header("x-api-key", ANTHROPIC_API_KEY)
     req.add_header("anthropic-version", "2023-06-01")
-
     with urllib.request.urlopen(req, timeout=120) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-
     for block in data["content"]:
         if block.get("type") == "text":
             return block["text"]
     return data["content"][0].get("text", "")
 
-
 def _generate_summary(categorized: dict) -> str:
     lines = []
     for cat, articles in categorized.items():
         for a in articles:
-            lines.append(f"[{cat}][{a.get('sentiment', '중립')}] {a['title']}: {a.get('summary', '')}")
+            tier = a.get("tier_score", 1)
+            tier_label = {5: "T1", 3: "T2", 2: "T3"}.get(tier, "T4")
+            lines.append(f"[{cat}][{a.get('sentiment', '중립')}][{tier_label}] {a['title']}: {a.get('summary', '')}")
     if not lines:
         return ""
-
     prompt = f"""아래는 오늘 에이블씨엔씨 관련 뉴스 모니터링 결과입니다.
 
-{chr(10).join(lines[:50])}
+{chr(10).join(lines[:80])}
 
-PR 대행사 대표의 관점에서 CEO에게 보고하는 핵심 인사이트를 작성하세요.
+PR 대행사 대표가 CEO에게 아침 보고하는 핵심 인사이트를 작성하세요.
 - 자사 관련 기사가 있으면 먼저 다루세요
 - 경쟁사와 업계 동향을 간략히 짚어주세요
 - 3~5줄 분량으로, 흐름과 의미를 짚어주세요
+- T1 매체 보도를 우선적으로 언급하세요
 - HTML 형식, <b> 태그로 핵심 강조"""
-
     try:
         return _call_claude(prompt)
     except Exception as e:
         print(f"[요약] 오류: {e}")
         return ""
-
 
 def _send_email(html: str, subject: str) -> bool:
     if not EMAIL_FROM or not EMAIL_PASSWORD:
@@ -443,14 +709,12 @@ def _send_email(html: str, subject: str) -> bool:
         msg["From"] = EMAIL_FROM
         msg["To"] = EMAIL_TO
         msg.attach(MIMEText(html, "html", "utf-8"))
-
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.ehlo()
             server.starttls()
             server.ehlo()
             server.login(EMAIL_FROM, EMAIL_PASSWORD)
             server.send_message(msg)
-
         print(f"[발송] 완료: {subject}")
         return True
     except Exception as e:
@@ -461,12 +725,15 @@ def _send_email(html: str, subject: str) -> bool:
 # ═══════════════════════════════════════════
 if __name__ == "__main__":
     print("=" * 60)
-    print(f"에이블씨엔씨 뉴스 모니터링 v2 시작: {datetime.datetime.now()}")
+    print(f"에이블씨엔씨 뉴스 모니터링 v3 시작: {datetime.datetime.now()}")
+    kw_total = len(COMPANY_KEYWORDS) + len(COMPETITOR_MAJOR_KEYWORDS) + len(COMPETITOR_INDIE_KEYWORDS) + len(INDUSTRY_KEYWORDS)
+    print(f"키워드: 자사 {len(COMPANY_KEYWORDS)} + 메이저 {len(COMPETITOR_MAJOR_KEYWORDS)} + 인디 {len(COMPETITOR_INDIE_KEYWORDS)} + 업계 {len(INDUSTRY_KEYWORDS)} = {kw_total}개")
     print("=" * 60)
 
     articles = collect_all()
     categorized = classify_articles(articles)
-    send_report(categorized)
+    grouped = group_similar_articles(categorized)
+    send_report(categorized, grouped)
 
     print("=" * 60)
     print(f"완료: {datetime.datetime.now()}")
