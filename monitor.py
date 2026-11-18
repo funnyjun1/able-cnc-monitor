@@ -135,7 +135,7 @@ def get_media_tier(source_name: str) -> int:
 # 1단계: 수집
 # ═══════════════════════════════════════════
 
-def collect_naver_api(keyword: str, display: int = 50) -> list[dict]:
+def collect_naver_api(keyword: str, display: int = 100) -> list[dict]:
     if not NAVER_CLIENT_ID:
         return []
     encoded = urllib.parse.quote(keyword)
