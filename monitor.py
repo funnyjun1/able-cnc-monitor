@@ -261,9 +261,47 @@ def collect_all() -> list[dict]:
             seen.add(key)
             unique.append(a)
 
-    filtered = _filter_fashion_missha(unique)
-    print(f"[수집] 총 {len(all_articles)}건 → 중복제거 {len(unique)}건 → 패션필터 후 {len(filtered)}건")
+    # 날짜 필터: 수집 윈도우 내 기사만 (기간 외 무조건 제외)
+    date_filtered = _filter_by_date(unique)
+    filtered = _filter_fashion_missha(date_filtered)
+    print(f"[수집] 총 {len(all_articles)}건 → 중복제거 {len(unique)}건 → 날짜필터 {len(date_filtered)}건 → 패션필터 후 {len(filtered)}건")
     return filtered
+
+
+def _filter_by_date(articles: list[dict]) -> list[dict]:
+    """수집 윈도우 내 기사만 남긴다. 가이드 기준: 전일 09:00 KST ~ 현재."""
+    from email.utils import parsedate_to_datetime
+
+    # 수집 윈도우 시작: 전일 09:00 KST (월요일이면 금요일 09:00)
+    now_kst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
+    search_days = int(os.environ.get("SEARCH_DAYS", "1"))
+
+    if search_days == 1:
+        # 전일 09:00 KST
+        window_start = (now_kst - datetime.timedelta(days=1)).replace(
+            hour=9, minute=0, second=0, microsecond=0)
+    else:
+        # N일 전 09:00 KST
+        window_start = (now_kst - datetime.timedelta(days=search_days)).replace(
+            hour=9, minute=0, second=0, microsecond=0)
+
+    print(f"[수집] 날짜 필터: {window_start.strftime('%Y-%m-%d %H:%M')} KST ~ 현재")
+
+    result = []
+    for a in articles:
+        pub_date = a.get("pub_date", "")
+        if not pub_date:
+            result.append(a)  # 날짜 없으면 포함
+            continue
+        try:
+            dt = parsedate_to_datetime(pub_date)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=9)))
+            if dt >= window_start:
+                result.append(a)
+        except Exception:
+            result.append(a)  # 파싱 실패면 포함
+    return result
 
 
 def _filter_fashion_missha(articles: list[dict]) -> list[dict]:
