@@ -231,8 +231,7 @@ def collect_all() -> list[dict]:
     total_keywords = sum(len(kws) for _, kws in keyword_groups)
     print(f"[수집] 총 {total_keywords}개 키워드 검색 시작")
 
-    # 네이버 API 단독 수집 (안정성 최우선)
-    # 구글/다음 RSS는 GitHub Actions IP 차단 리스크가 있어 제거
+    # 1차: 네이버 API로 전체 키워드 수집 (메인)
     collect_start = time.time()
 
     for group_name, keywords in keyword_groups:
@@ -242,13 +241,30 @@ def collect_all() -> list[dict]:
             naver = collect_naver_api(kw)
             all_articles.extend(naver)
             group_count += len(naver)
-            # 진행상황 10개마다 출력
             if (idx + 1) % 10 == 0:
                 elapsed = time.time() - group_start
                 print(f"[수집] {group_name}: {idx+1}/{len(keywords)} 완료 ({group_count}건, {elapsed:.0f}초)")
-            time.sleep(0.15)  # API rate limit
+            time.sleep(0.15)
         elapsed = time.time() - group_start
         print(f"[수집] {group_name}: {len(keywords)}개 키워드 → {group_count}건 ({elapsed:.0f}초)")
+
+    naver_elapsed = time.time() - collect_start
+    naver_count = len(all_articles)
+    print(f"[수집] 네이버 완료: {naver_count}건 ({naver_elapsed:.0f}초)")
+
+    # 2차: 자사 키워드만 구글·다음 RSS 추가 (네이버에 없는 기사 보충)
+    # RSS 차단 시 자동 스킵 (8초 타임아웃)
+    rss_count = 0
+    for kw in COMPANY_KEYWORDS:
+        google = collect_google_rss(kw)
+        daum = collect_daum_rss(kw)
+        all_articles.extend(google + daum)
+        rss_count += len(google) + len(daum)
+        time.sleep(0.2)
+    if rss_count > 0:
+        print(f"[수집] 구글·다음 RSS (자사 7개): {rss_count}건 추가")
+    else:
+        print(f"[수집] 구글·다음 RSS: 0건 (차단 또는 결과 없음 — 네이버 단독 진행)")
 
     total_elapsed = time.time() - collect_start
     print(f"[수집] 전체 수집 완료: {len(all_articles)}건 ({total_elapsed:.0f}초)")
