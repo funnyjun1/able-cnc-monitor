@@ -497,11 +497,15 @@ def send_report(categorized: dict, grouped: dict) -> bool:
     html = _build_html(today, weekday, total, summary_text, grouped, categorized)
 
     parts = []
-    label_map = {"자사배포": "배포", "자사언급": "언급", "경쟁사메이저": "메이저",
-                 "경쟁사인디": "인디", "업계": "업계"}
-    for k, v in categorized.items():
-        if v:
-            parts.append(f"{label_map.get(k, k)} {len(v)}")
+    comp_count = len(categorized.get("경쟁사메이저", [])) + len(categorized.get("경쟁사인디", []))
+    if categorized.get("자사배포"):
+        parts.append(f"배포 {len(categorized['자사배포'])}")
+    if categorized.get("자사언급"):
+        parts.append(f"언급 {len(categorized['자사언급'])}")
+    if comp_count:
+        parts.append(f"경쟁사 {comp_count}")
+    if categorized.get("업계"):
+        parts.append(f"업계 {len(categorized['업계'])}")
     detail = ", ".join(parts) if parts else "기사 없음"
     subject = f"[에이블씨엔씨] 뉴스 모니터링 — {today} ({weekday}) | {detail}"
 
@@ -517,16 +521,14 @@ def send_report(categorized: dict, grouped: dict) -> bool:
 
 
 def _build_html(today, weekday, total, summary_text, grouped, categorized):
-    label_map = {"자사배포": "배포", "자사언급": "언급", "경쟁사메이저": "메이저",
-                 "경쟁사인디": "인디", "업계": "업계"}
-
     html = f"""<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
-<title>ABLE C&amp;C DAILY MONITORING {today}</title></head>
+<title>ABLE C&amp;C DAILY MONITORING {today}</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet"></head>
 <body style="margin:0;padding:0;background-color:#FAF6F1;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FAF6F1;">
 <tr><td align="center" style="padding:16px;">
-<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#2B2620;">
+<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#2B2620;">
 
 <tr><td style="padding:2px 4px 12px 4px;border-bottom:3px solid #E8730C;">
 <div style="font-size:27px;font-weight:bold;color:#2B2620;letter-spacing:.3px;">ABLE C&amp;C · DAILY MONITORING</div>
@@ -539,9 +541,15 @@ GitHub Actions · AI 분류 · v3
 </td></tr>"""
 
     stats_parts = []
-    for cat, arts in categorized.items():
-        if arts:
-            stats_parts.append(f"{label_map.get(cat, cat)} {len(arts)}")
+    comp_total = len(categorized.get("경쟁사메이저", [])) + len(categorized.get("경쟁사인디", []))
+    if categorized.get("자사배포"):
+        stats_parts.append(f"배포 {len(categorized['자사배포'])}")
+    if categorized.get("자사언급"):
+        stats_parts.append(f"언급 {len(categorized['자사언급'])}")
+    if comp_total:
+        stats_parts.append(f"경쟁사 {comp_total}")
+    if categorized.get("업계"):
+        stats_parts.append(f"업계 {len(categorized['업계'])}")
     stats_str = " · ".join(stats_parts) if stats_parts else "수집 기사 없음"
 
     html += f"""<tr><td style="padding:10px 0 0 0;">
@@ -563,33 +571,40 @@ GitHub Actions · AI 분류 · v3
 <div style="font-size:13.5px;color:#4a4036;line-height:1.7;">{summary_text}</div>
 </td></tr></table></td></tr>"""
 
+        # 경쟁사 메이저+인디 통합
+        competitor_arts = grouped.get("경쟁사메이저", []) + grouped.get("경쟁사인디", [])
+        competitor_orig = len(categorized.get("경쟁사메이저", [])) + len(categorized.get("경쟁사인디", []))
+
         sections = [
-            ("자사배포", "1", "자사 배포", "#E8730C"),
-            ("자사언급", "2", "자사 언급", "#C25A00"),
-            ("경쟁사메이저", "3", "경쟁사 — 메이저", "#2E86AB"),
-            ("경쟁사인디", "4", "경쟁사 — 인디", "#5BA4CF"),
-            ("업계", "5", "화장품 업계 · 트렌드", "#6B5F52"),
+            ("자사배포", "1", "자사 배포", "#E8730C", True),
+            ("자사언급", "2", "자사 언급", "#C25A00", True),
+            ("_경쟁사", "3", "경쟁사", "#2E86AB", False),
+            ("업계", "4", "화장품 업계 · 트렌드", "#6B5F52", False),
         ]
 
-        for cat_key, num, label, color in sections:
-            arts = grouped.get(cat_key, [])
-            orig_count = len(categorized.get(cat_key, []))
+        for cat_key, num, label, color, show_badges in sections:
+            if cat_key == "_경쟁사":
+                arts = competitor_arts
+                orig_count = competitor_orig
+            else:
+                arts = grouped.get(cat_key, [])
+                orig_count = len(categorized.get(cat_key, []))
             if not arts:
                 continue
-            html += _build_section(num, f"{label} ({orig_count}건)", arts, color)
+            html += _build_section(num, f"{label} ({orig_count}건)", arts, color, show_badges)
 
     html += f"""<tr><td style="padding:16px 0 0 0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E5DACB;">
 <tr><td align="center" style="padding:12px 15px;font-size:11.5px;color:#857B6F;">
 Monitoring by <b style="color:#2B2620;">프라우드컴(주)</b> · Copyright 2026 Proudcomm<br>
-<span style="font-size:10px;color:#aaa;">네이버 API + 구글 RSS + 다음 | Claude AI 분류 | v3</span>
+<span style="font-size:10px;color:#aaa;">네이버 뉴스 API | Claude AI 분류 | v3</span>
 </td></tr></table></td></tr>
 
 </table></td></tr></table></body></html>"""
     return html
 
 
-def _build_section(num, label, articles, accent_color):
+def _build_section(num, label, articles, accent_color, show_badges=False):
     s = f"""<tr><td style="padding:14px 0 0 0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFFFF;border:1px solid #ECE3D8;">
 <tr><td style="padding:16px 18px;">
@@ -611,10 +626,15 @@ def _build_section(num, label, articles, accent_color):
         tier_label, tier_color = tier_badges.get(tier_score, ("T4", "#bbb"))
         others_html = f' <span style="color:#C25A00;font-size:11px;">외 {others}건</span>' if others > 0 else ""
 
+        # 감성배지+티어배지는 자사/자사언급만 표시
+        if show_badges:
+            badge_html = f"""<span style="display:inline-block;background:{s_color};color:white;padding:1px 6px;border-radius:3px;font-size:10px;">{sentiment}</span>
+<span style="display:inline-block;background:{tier_color};color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:2px;">{tier_label}</span>&nbsp;"""
+        else:
+            badge_html = ""
+
         s += f"""<div style="font-size:14px;padding:7px 0;border-top:1px solid #F2ECE3;">
-<span style="display:inline-block;background:{s_color};color:white;padding:1px 6px;border-radius:3px;font-size:10px;">{sentiment}</span>
-<span style="display:inline-block;background:{tier_color};color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:2px;">{tier_label}</span>&nbsp;
-<a href="{link}" style="color:#2B2620;text-decoration:none;font-weight:bold;">{title}</a>{others_html}
+{badge_html}<a href="{link}" style="color:#2B2620;text-decoration:none;font-weight:bold;">{title}</a>{others_html}
 <span style="color:#C25A00;font-size:11px;font-weight:bold;"> {source} ›</span>
 <br><span style="color:#857B6F;font-size:12px;">{summary}</span></div>"""
 
@@ -777,26 +797,24 @@ def _generate_summary(categorized: dict) -> str:
 PR 대행사 대표가 CEO에게 아침 보고하는 Today Summary를 아래 형식으로 작성하세요.
 
 **형식 규칙:**
-- 번호를 매긴 항목별 서술 (1. 2. 3. ...)
-- 각 항목은 간단한 포인트만 — 1~2문장 이내로 짧게
+- 3개 인사이트 블록 + 시사점 1개로 구성
 - 명사형 종결체 ("~임", "~됨", "~필요" 등)
-- 각 항목 사이에 <br><br>로 줄바꿈하여 가독성 확보
+- 각 블록 사이에 <br><br>로 줄바꿈하여 가독성 확보
 - HTML 형식, <b> 태그로 카테고리 강조
 
-**내용 규칙:**
-- [자사]: 배포나 언급이 있을 때만 작성. 없으면 아예 언급하지 않음. "배포 없었다" 같은 말 절대 금지.
-- [경쟁사]: 주목할 움직임만 각각 한 줄로 서술
-- [업계 동향]: 핵심 이슈만 짧게
-- [시사점]: 미샤/에이블씨엔씨 관점 대응 방향 1~2문장
+**내용 규칙 (이 순서대로):**
+1. <b>[자사]</b> 자사배포+자사언급을 묶어서 전체 인사이트 2~3문장. 배포/언급 없으면 이 블록 자체를 생략. "배포 없었다" 같은 말 절대 금지.
+2. <b>[경쟁사]</b> 메이저+인디 경쟁사를 묶어서 전체 인사이트 2~3문장. 주목할 움직임 위주.
+3. <b>[업계]</b> 업계 전체 인사이트 2~3문장. 유통·규제·트렌드 핵심만.
+4. <b>[시사점]</b> 미샤/에이블씨엔씨 관점 대응 방향 1~2문장. 위 3개 블록과 별도로 작성.
 
 **참고 예시 (이 형식을 정확히 따를 것):**
-1. <b>[자사]</b> 미샤 윈터 캠페인 기사 4건 기사화, 전부 T3 자사배포. T1 2차 보도 확보 필요.<br><br>
-2. <b>[경쟁사]</b> 아누아, 수지 겨울 캠페인 7건 — PDRN 세럼 전면 푸시 중.<br><br>
-3. <b>[경쟁사]</b> 티르티르, 미국 엘르 뷰티 어워즈 수상 등 해외 성과 연달아 발표.<br><br>
-4. <b>[업계]</b> 구다이글로벌 코스피 상장 예비심사 청구, 기업가치 최대 10조 원 관측.<br><br>
-5. <b>[시사점]</b> 초저가 확대·해외 어워즈 경쟁 재편 중. 미샤 가격 포지셔닝과 캠페인 외부 확산 전략 점검 필요.
+<b>[자사]</b> 미샤 윈터 캠페인 화보 기사 4건 기사화(모두 T3 자사배포). 올리브영 블프 인기상품에 미샤 포함되어 외부 언급 1건 확인. T1 매체 2차 보도 확보가 과제.<br><br>
+<b>[경쟁사]</b> 아누아가 수지 겨울 캠페인으로 7건을 쏟아내며 PDRN 세럼을 전면에 내세우는 중. 티르티르는 미국 엘르 뷰티 어워즈 수상 등 해외 성과를 연달아 발표하며 글로벌 인지도 확장 중.<br><br>
+<b>[업계]</b> 구다이글로벌 코스피 상장 예비심사 청구(기업가치 최대 10조 원 관측)로 IPO 시장 주목. 이마트·노브랜드의 초저가 더마 라인 확대로 유통 지각변동 진행 중.<br><br>
+<b>[시사점]</b> 초저가 확대·해외 어워즈 경쟁으로 시장 재편 중. 미샤는 캠페인 성과를 T1 매체로 확산시키고, 가격 포지셔닝 점검 필요.
 
-위 예시처럼 간단·짧게, 항목 사이 줄바꿈으로 작성. 해당 없는 섹션은 생략."""
+위 예시처럼 블록별로 묶어서 작성. 해당 없는 블록은 생략."""
     try:
         return _call_claude(prompt)
     except Exception as e:
