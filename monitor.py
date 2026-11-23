@@ -524,11 +524,11 @@ def _build_html(today, weekday, total, summary_text, grouped, categorized):
     html = f"""<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <title>ABLE C&amp;C DAILY MONITORING {today}</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet"></head>
-<body style="margin:0;padding:0;background-color:#FAF6F1;">
+<style>@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');</style></head>
+<body style="margin:0;padding:0;background-color:#FAF6F1;font-family:'Noto Sans KR',-apple-system,BlinkMacSystemFont,'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo','Helvetica Neue',sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FAF6F1;">
 <tr><td align="center" style="padding:16px;">
-<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#2B2620;">
+<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:'Noto Sans KR',-apple-system,BlinkMacSystemFont,'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo','Helvetica Neue',sans-serif;color:#2B2620;">
 
 <tr><td style="padding:2px 4px 12px 4px;border-bottom:3px solid #E8730C;">
 <div style="font-size:27px;font-weight:bold;color:#2B2620;letter-spacing:.3px;">ABLE C&amp;C · DAILY MONITORING</div>
