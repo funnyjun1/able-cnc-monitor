@@ -797,7 +797,7 @@ def _build_html(today, weekday, total, summary_text, grouped, categorized, socia
 
         jasa_baepo = grouped.get("자사배포", [])
         jasa_news = grouped.get("자사언급", [])
-        social_items = social or []
+        social_items = (social or [])[:20]  # 블로그·카페 상위 20건 제한
 
         # 1. 자사 섹션 (배포 + 뉴스 + 블로그·카페 서브)
         if jasa_baepo or jasa_news or social_items:
