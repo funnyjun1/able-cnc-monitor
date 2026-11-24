@@ -584,42 +584,38 @@ def send_report(categorized: dict, grouped: dict) -> bool:
 
 
 def _build_html(today, weekday, total, summary_text, grouped, categorized):
+    FONT = "'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif"
+
+    # 모니터링 기간 계산
+    now_kst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
+    search_days = int(os.environ.get("SEARCH_DAYS", "1"))
+    window_start = (now_kst - datetime.timedelta(days=search_days)).replace(
+        hour=9, minute=0, second=0, microsecond=0)
+    start_wd = ["월", "화", "수", "목", "금", "토", "일"][window_start.weekday()]
+    end_wd = weekday
+    period_str = (f"{window_start.month}/{window_start.day}({start_wd}) "
+                  f"{window_start.strftime('%H:%M')} ~ "
+                  f"{now_kst.month}/{now_kst.day}({end_wd}) "
+                  f"{now_kst.strftime('%H:%M')}")
+
     html = f"""<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <title>ABLE C&amp;C DAILY MONITORING {today}</title>
 </head>
-<body style="margin:0;padding:0;background-color:#FAF6F1;font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif;font-size:11px;">
+<body style="margin:0;padding:0;background-color:#FAF6F1;font-family:{FONT};font-size:11px;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FAF6F1;">
 <tr><td align="center" style="padding:16px;">
-<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif;font-size:11px;color:#2B2620;">
+<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:{FONT};font-size:11px;color:#2B2620;">
 
 <tr><td style="padding:2px 4px 12px 4px;border-bottom:3px solid #E8730C;">
-<div style="font-size:22px;font-weight:bold;color:#2B2620;letter-spacing:.3px;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">ABLE C&amp;C · DAILY MONITORING</div>
+<div style="font-size:22px;font-weight:bold;color:#2B2620;letter-spacing:.5px;font-family:{FONT};">ABLE C&amp;C · DAILY MONITORING</div>
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:9px;">
 <tr><td style="vertical-align:bottom;">
-<span style="font-size:16px;font-weight:bold;color:#C25A00;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">{today.replace('-', '. ')} ({weekday})</span>
-</td><td align="right" style="vertical-align:bottom;font-size:11px;color:#857B6F;font-weight:bold;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">
-GitHub Actions · AI 분류 · v3
+<span style="font-size:15px;font-weight:bold;color:#C25A00;font-family:{FONT};">{today.replace('-', '. ')} ({weekday})</span>
+</td><td align="right" style="vertical-align:bottom;font-size:10px;color:#857B6F;font-family:{FONT};">
+모니터링 기간 &nbsp;{period_str}
 </td></tr></table>
 </td></tr>"""
-
-    stats_parts = []
-    comp_total = len(categorized.get("경쟁사메이저", [])) + len(categorized.get("경쟁사인디", []))
-    if categorized.get("자사배포"):
-        stats_parts.append(f"배포 {len(categorized['자사배포'])}")
-    if categorized.get("자사언급"):
-        stats_parts.append(f"언급 {len(categorized['자사언급'])}")
-    if comp_total:
-        stats_parts.append(f"경쟁사 {comp_total}")
-    if categorized.get("업계"):
-        stats_parts.append(f"업계 {len(categorized['업계'])}")
-    stats_str = " · ".join(stats_parts) if stats_parts else "수집 기사 없음"
-
-    html += f"""<tr><td style="padding:10px 0 0 0;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F5EFE6;border:1px solid #E5DACB;">
-<tr><td style="padding:8px 14px;font-size:11px;color:#6B5F52;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">
-총 <b>{total}</b>건 | {stats_str}
-</td></tr></table></td></tr>"""
 
     if total == 0:
         html += """<tr><td style="padding:20px 0;">
@@ -671,29 +667,37 @@ GitHub Actions · AI 분류 · v3
         if len(industry_arts) > 30:
             industry_arts = industry_arts[:30]
 
-        competitor_orig = len(categorized.get("경쟁사메이저", [])) + len(categorized.get("경쟁사인디", [])) + len(moved_to_comp)
-        industry_orig = len(industry_arts)
-
-        sections = [
-            ("자사배포", "1", "자사 배포", "#E8730C"),
-            ("자사언급", "2", "자사 언급", "#C25A00"),
-            ("_경쟁사", "3", "경쟁사", "#2E86AB"),
-            ("_업계", "4", "화장품 업계 · 트렌드", "#6B5F52"),
-        ]
-
-        for cat_key, num, label, color in sections:
-            if cat_key == "_경쟁사":
-                arts = competitor_arts
-                orig_count = competitor_orig
-            elif cat_key == "_업계":
-                arts = industry_arts
-                orig_count = industry_orig
+        # 경쟁사 메이저/인디 분리 유지 (서브섹션용)
+        comp_major = grouped.get("경쟁사메이저", [])
+        comp_indie = grouped.get("경쟁사인디", [])
+        # 업계에서 이동한 기사는 메이저/인디 판별
+        major_kw_set = set(COMPETITOR_MAJOR_KEYWORDS)
+        for a in moved_to_comp:
+            if any(kw in a["title"] for kw in major_kw_set):
+                comp_major.append(a)
             else:
-                arts = grouped.get(cat_key, [])
-                orig_count = len(categorized.get(cat_key, []))
-            if not arts:
-                continue
-            html += _build_section(num, f"{label} ({orig_count}건)", arts, color)
+                comp_indie.append(a)
+
+        jasa_baepo = grouped.get("자사배포", [])
+        jasa_news = grouped.get("자사언급", [])
+
+        # 1. 자사 섹션 (배포 + 뉴스 서브)
+        if jasa_baepo or jasa_news:
+            html += _build_section_with_subs("1", "자사", "#E8730C", [
+                ("배포", jasa_baepo),
+                ("뉴스", jasa_news),
+            ])
+
+        # 3. 경쟁사 섹션 (메이저 + 인디 서브)
+        if comp_major or comp_indie:
+            html += _build_section_with_subs("3", "경쟁사", "#E8730C", [
+                ("메이저", comp_major),
+                ("인디", comp_indie),
+            ])
+
+        # 4. 업계·트렌드
+        if industry_arts:
+            html += _build_section_flat("4", "업계·트렌드", "#E8730C", industry_arts)
 
     html += f"""<tr><td style="padding:16px 0 0 0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E5DACB;">
@@ -706,23 +710,66 @@ Monitoring by <b style="color:#2B2620;">프라우드컴(주)</b> · Copyright 20
     return html
 
 
-def _build_section(num, label, articles, accent_color):
+def _article_date_prefix(article: dict) -> str:
+    """기사 날짜에서 M/D 형식 추출."""
+    pub_date = article.get("pub_date", "")
+    if not pub_date:
+        return ""
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(pub_date)
+        return f"{dt.month}/{dt.day}"
+    except Exception:
+        return ""
+
+
+def _render_article_line(a: dict) -> str:
+    """참조 디자인: 날짜 + 헤드라인 + 외N건 + 매체명."""
+    FONT = "'Malgun Gothic','맑은 고딕',sans-serif"
+    date_str = _article_date_prefix(a)
+    title = a["title"]
+    link = a["link"]
+    source = _to_korean_media(a["source"])
+    others = a.get("others_count", 0)
+    others_html = f' <span style="color:#C25A00;">외 {others}건</span>' if others > 0 else ""
+    date_html = f'<span style="color:#C25A00;font-weight:bold;">{date_str}</span> &nbsp;' if date_str else ""
+
+    return f"""<div style="font-size:11px;padding:6px 0 6px 12px;line-height:1.5;font-family:{FONT};">
+{date_html}<a href="{link}" style="color:#2B2620;text-decoration:none;">{title}</a>{others_html}
+<span style="color:#C25A00;font-size:10px;"> {source} ›</span></div>"""
+
+
+def _build_section_with_subs(num, label, accent_color, sub_sections):
+    """자사(배포/뉴스), 경쟁사(메이저/인디) 등 서브섹션이 있는 섹션."""
+    FONT = "'Malgun Gothic','맑은 고딕',sans-serif"
     s = f"""<tr><td style="padding:14px 0 0 0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFFFF;border:1px solid #ECE3D8;">
 <tr><td style="padding:16px 18px;">
-<div style="font-size:14px;font-weight:bold;color:#2B2620;padding-bottom:6px;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">
+<div style="font-size:14px;font-weight:bold;color:#2B2620;padding-bottom:10px;font-family:{FONT};">
+<span style="color:{accent_color};">{num}</span> &nbsp;&nbsp;{label}</div>"""
+
+    for sub_name, articles in sub_sections:
+        if not articles:
+            continue
+        s += f"""<div style="font-size:11px;font-weight:bold;color:#E8730C;padding:8px 0 2px 0;border-top:2px solid #F2ECE3;font-family:{FONT};">▌{sub_name}</div>"""
+        for a in articles:
+            s += _render_article_line(a)
+
+    s += "</td></tr></table></td></tr>"
+    return s
+
+
+def _build_section_flat(num, label, accent_color, articles):
+    """서브섹션 없는 단일 섹션 (업계·트렌드)."""
+    FONT = "'Malgun Gothic','맑은 고딕',sans-serif"
+    s = f"""<tr><td style="padding:14px 0 0 0;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFFFF;border:1px solid #ECE3D8;">
+<tr><td style="padding:16px 18px;">
+<div style="font-size:14px;font-weight:bold;color:#2B2620;padding-bottom:6px;font-family:{FONT};">
 <span style="color:{accent_color};">{num}</span> &nbsp;&nbsp;{label}</div>"""
 
     for a in articles:
-        title = a["title"]
-        link = a["link"]
-        source = _to_korean_media(a["source"])
-        others = a.get("others_count", 0)
-        others_html = f' <span style="color:#C25A00;font-size:11px;">외 {others}건</span>' if others > 0 else ""
-
-        s += f"""<div style="font-size:11px;padding:8px 0;border-top:1px solid #F2ECE3;line-height:1.6;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">
-<a href="{link}" style="color:#2B2620;text-decoration:none;font-weight:bold;">{title}</a>{others_html}
-<span style="color:#C25A00;font-size:11px;font-weight:bold;"> {source} ›</span></div>"""
+        s += _render_article_line(a)
 
     s += "</td></tr></table></td></tr>"
     return s
@@ -883,24 +930,22 @@ def _generate_summary(categorized: dict) -> str:
 PR 대행사 대표가 CEO에게 아침 보고하는 Today Summary를 아래 형식으로 작성하세요.
 
 **형식 규칙:**
-- 3개 인사이트 블록 + 시사점 1개로 구성
-- 명사형 종결체 ("~임", "~됨", "~필요" 등)
-- 각 블록 사이에 <br><br>로 줄바꿈하여 가독성 확보
-- HTML 형식, <b> 태그로 카테고리 강조
+- 번호(1. 2. 3.) + 카테고리명으로 구성
+- 나열형 서술체 (콤마로 이어가며 주요 사실 나열)
+- 각 블록 사이에 <br><br>로 줄바꿈
+- HTML 형식, <b> 태그로 번호+카테고리 강조
 
 **내용 규칙 (이 순서대로):**
-1. <b>[자사]</b> 자사배포+자사언급을 묶어서 전체 인사이트 2~3문장. 배포/언급 없으면 이 블록 자체를 생략. "배포 없었다" 같은 말 절대 금지.
-2. <b>[경쟁사]</b> 메이저+인디 경쟁사를 묶어서 전체 인사이트 2~3문장. 주목할 움직임 위주.
-3. <b>[업계]</b> 업계 전체 인사이트 2~3문장. 유통·규제·트렌드 핵심만.
-4. <b>[시사점]</b> 미샤/에이블씨엔씨 관점 대응 방향 1~2문장. 위 3개 블록과 별도로 작성.
+1. <b>1. 자사</b> 자사배포+자사언급 주요 기사를 구체적으로 나열. 매체명, 건수, 핵심 내용 포함. 배포/언급 없으면 이 블록 자체를 생략.
+2. <b>2. 경쟁사</b> 메이저+인디 경쟁사 주요 움직임을 구체적으로 나열. 기업명+행위 중심.
+3. <b>3. 업계</b> 업계 전반 이슈를 구체적으로 나열. 유통·플랫폼·트렌드 핵심만.
 
 **참고 예시 (이 형식을 정확히 따를 것):**
-<b>[자사]</b> 미샤 윈터 캠페인 화보 기사 4건 기사화(모두 T3 자사배포). 올리브영 블프 인기상품에 미샤 포함되어 외부 언급 1건 확인. T1 매체 2차 보도 확보가 과제.<br><br>
-<b>[경쟁사]</b> 아누아가 수지 겨울 캠페인으로 7건을 쏟아내며 PDRN 세럼을 전면에 내세우는 중. 티르티르는 미국 엘르 뷰티 어워즈 수상 등 해외 성과를 연달아 발표하며 글로벌 인지도 확장 중.<br><br>
-<b>[업계]</b> 구다이글로벌 코스피 상장 예비심사 청구(기업가치 최대 10조 원 관측)로 IPO 시장 주목. 이마트·노브랜드의 초저가 더마 라인 확대로 유통 지각변동 진행 중.<br><br>
-<b>[시사점]</b> 초저가 확대·해외 어워즈 경쟁으로 시장 재편 중. 미샤는 캠페인 성과를 T1 매체로 확산시키고, 가격 포지셔닝 점검 필요.
+<b>1. 자사</b> 어퓨 '과즙팡 파스텔 블러셔&하이라이터 듀오' 5종 출시 브릿지경제 포함 11건 게재, 아주경제 '쇼핑도 AI에 묻는다' 기획에서 에이블씨엔씨가 커뮤니케이션 AX의 첫 단계로 생성형엔진 최적화(GEO)를 추진한다고 조명<br><br>
+<b>2. 경쟁사</b> 아모레퍼시픽 김승환 대표의 일본 '아시아 뷰티테크 어워즈' 기조연설, 메디큐브의 미국 틱톡샵 제휴 크리에이터 콘텐츠 인종차별 논란... 불매 위기 확산<br><br>
+<b>3. 업계</b> 올리브영·무신사·컬리의 오프라인·연령 확장 경쟁, 올리브영 회원가입 연령을 만 14세에서 12세로 낮춘다고 발표, 가성비로 매대를 넓힌 K뷰티가 가격 인상 시험대에 올랐다는 분석
 
-위 예시처럼 블록별로 묶어서 작성. 해당 없는 블록은 생략."""
+위 예시처럼 번호+카테고리로 작성. 해당 없는 블록은 생략. HTML 태그 <b> 사용."""
     try:
         return _call_claude(prompt)
     except Exception as e:
