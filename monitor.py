@@ -201,33 +201,53 @@ def _fetch_rss(url: str, keyword: str, source: str) -> list[dict]:
 
 
 def _extract_media_name(url: str) -> str:
+    """URL에서 한글 매체명을 추출한다."""
     try:
         from urllib.parse import urlparse
-        domain = urlparse(url).netloc
-        raw = DOMAIN_TO_KOREAN.get(domain)
-        if raw:
-            return raw
-        # www 제거 후 재시도
-        no_www = domain.replace("www.", "")
+        domain = urlparse(url).netloc.lower()
+        if not domain:
+            return "알수없음"
+        # 1. 정확히 일치
+        if domain in DOMAIN_TO_KOREAN:
+            return DOMAIN_TO_KOREAN[domain]
+        # 2. www 제거 후 매칭
+        d = domain[4:] if domain.startswith("www.") else domain
         for k, v in DOMAIN_TO_KOREAN.items():
-            if no_www in k or k.replace("www.", "") == no_www:
+            k2 = k[4:] if k.startswith("www.") else k
+            if d == k2:
                 return v
-        return no_www.split(".")[0]
+        # 3. 부분 도메인 포함 매칭 (sports.khan.co.kr → khan 포함)
+        parts = d.split(".")
+        for k, v in DOMAIN_TO_KOREAN.items():
+            k2 = k[4:] if k.startswith("www.") else k
+            k_parts = k2.split(".")
+            # 주요 단어가 겹치면 매칭
+            if set(parts) & set(k_parts) - {"co", "kr", "com", "net", "org", "or"}:
+                return v
+        return d.split(".")[0]
     except Exception:
         return "알수없음"
 
 
-# 도메인→한글 매체명 매핑 (확장)
+# 도메인→한글 매체명 매핑
 DOMAIN_TO_KOREAN = {
+    # === T1 주요 매체 ===
     "www.yna.co.kr": "연합뉴스", "www.newsis.com": "뉴시스",
     "www.news1.kr": "뉴스1", "www.chosun.com": "조선일보",
-    "www.joongang.co.kr": "중앙일보", "www.donga.com": "동아일보",
-    "www.hankookilbo.com": "한국일보", "www.khan.co.kr": "경향신문",
-    "www.hani.co.kr": "한겨레", "www.mk.co.kr": "매일경제",
-    "www.hankyung.com": "한국경제", "www.sedaily.com": "서울경제",
-    "www.edaily.co.kr": "이데일리", "biz.heraldcorp.com": "헤럴드경제",
+    "biz.chosun.com": "조선비즈", "www.joongang.co.kr": "중앙일보",
+    "www.donga.com": "동아일보", "www.hankookilbo.com": "한국일보",
+    "www.khan.co.kr": "경향신문", "www.hani.co.kr": "한겨레",
+    "www.mk.co.kr": "매일경제", "www.hankyung.com": "한국경제",
+    "www.sedaily.com": "서울경제", "www.edaily.co.kr": "이데일리",
+    "biz.heraldcorp.com": "헤럴드경제", "news.heraldcorp.com": "헤럴드경제",
     "www.fnnews.com": "파이낸셜뉴스", "www.asiae.co.kr": "아시아경제",
     "news.mt.co.kr": "머니투데이", "www.thebell.co.kr": "더벨",
+    "news.sbs.co.kr": "SBS", "www.sbs.co.kr": "SBS",
+    "news.kbs.co.kr": "KBS", "www.kbs.co.kr": "KBS",
+    "imnews.imbc.com": "MBC", "www.mbc.co.kr": "MBC",
+    "www.ytn.co.kr": "YTN", "news.jtbc.co.kr": "JTBC",
+    "www.mbn.co.kr": "MBN",
+    # === 경제/산업 ===
     "www.ajunews.com": "아주경제", "www.dt.co.kr": "디지털타임스",
     "www.etnews.com": "전자신문", "www.zdnet.co.kr": "지디넷코리아",
     "www.bloter.net": "블로터", "www.inews24.com": "아이뉴스24",
@@ -236,51 +256,52 @@ DOMAIN_TO_KOREAN = {
     "www.segye.com": "세계일보", "www.kukinews.com": "쿠키뉴스",
     "www.nocutnews.co.kr": "노컷뉴스", "www.dailian.co.kr": "데일리안",
     "www.sisajournal.com": "시사저널", "www.shinailbo.co.kr": "신아일보",
+    "www.seoul.co.kr": "서울신문", "www.metroseoul.co.kr": "메트로서울",
+    "www.seoulfn.com": "서울파이낸스",
+    # === 스포츠/엔터 ===
     "www.sportsseoul.com": "스포츠서울", "sports.khan.co.kr": "스포츠경향",
     "www.sportsworldi.com": "스포츠월드", "www.sportsw.kr": "스포츠W",
+    "sports.chosun.com": "스포츠조선", "isplus.com": "일간스포츠",
+    "www.starnewskorea.com": "스타뉴스", "www.topstarnews.net": "톱스타뉴스",
+    "www.xportsnews.com": "엑스포츠뉴스", "www.osen.co.kr": "OSEN",
+    "www.spotvnews.co.kr": "스포티비뉴스", "www.newsen.com": "뉴센",
+    # === 뷰티/패션/소비 ===
     "www.bntnews.co.kr": "비엔티뉴스", "www.beautynury.com": "뷰티누리",
     "www.cmn.co.kr": "화장품신문", "www.cosinkorea.com": "코신코리아",
     "www.cstimes.com": "컨슈머타임스", "www.theviewers.co.kr": "더뷰어스",
-    "www.beautyhankook.com": "뷰티한국", "www.g-enews.com": "글로벌이코노믹",
-    "www.econovill.com": "이코노믹리뷰", "www.enewstoday.co.kr": "이뉴스투데이",
-    "www.nextdaily.co.kr": "넥스트데일리", "www.newsian.co.kr": "뉴시안",
-    "www.pointe.co.kr": "포인트데일리", "www.wsobi.com": "여성소비자신문",
-    "www.thefairnews.co.kr": "더페어뉴스", "www.insight.co.kr": "인사이트",
-    "www.ddaily.co.kr": "디지털데일리", "www.thebk.co.kr": "더비케이",
-    "www.seoul.co.kr": "서울신문", "www.metroseoul.co.kr": "메트로서울",
-    "www.webeconomy.co.kr": "웹이코노미", "www.itbiznews.com": "아이티비즈",
+    "www.beautyhankook.com": "뷰티한국", "www.fashionbiz.co.kr": "패션비즈",
+    "www.fashionseoul.com": "패션서울", "www.apparelnews.co.kr": "어패럴뉴스",
+    "www.fashionjournal.co.kr": "패션저널", "www.singlist.com": "싱글리스트",
+    # === IT/테크 ===
+    "www.ddaily.co.kr": "디지털데일리", "www.itbiznews.com": "아이티비즈",
+    "www.g-enews.com": "글로벌이코노믹", "www.econovill.com": "이코노믹리뷰",
+    # === 종합/지역 ===
+    "www.enewstoday.co.kr": "이뉴스투데이", "www.nextdaily.co.kr": "넥스트데일리",
+    "www.newsian.co.kr": "뉴시안", "www.pointe.co.kr": "포인트데일리",
+    "www.wsobi.com": "여성소비자신문", "www.thefairnews.co.kr": "더페어뉴스",
+    "www.insight.co.kr": "인사이트", "www.thebk.co.kr": "더비케이",
+    "www.webeconomy.co.kr": "웹이코노미",
     "www.pinpointnews.co.kr": "핀포인트뉴스", "www.popcornnews.net": "팝콘뉴스",
-    "www.dhnews.co.kr": "대학뉴스", "www.dailysmart.co.kr": "데일리스마트",
+    "www.dhnews.co.kr": "대학저널", "www.dailysmart.co.kr": "데일리스마트",
     "www.newsfreezone.co.kr": "뉴스프리존", "www.gosiweek.com": "고시위크",
     "www.beyondpost.co.kr": "비욘드포스트", "dream.kotra.or.kr": "코트라",
     "www.e-science.co.kr": "이사이언스", "www.view.co.kr": "뷰어스",
     "www.koreadaily.com": "코리아데일리", "www.vegannews.co.kr": "비건뉴스",
     "www.newsdream.net": "뉴스드림", "www.catchnews.co.kr": "캐치뉴스",
-    "www.lcnews.co.kr": "르씨엘뉴스", "www.dnews.co.kr": "대학뉴스",
+    "www.lcnews.co.kr": "르씨엘뉴스", "www.dnews.co.kr": "디노미뉴스",
     "www.iminju.net": "민주신문", "www.news2day.co.kr": "뉴스투데이",
     "www.kbsm.net": "KBS미디어", "www.businessplus.kr": "비즈니스플러스",
     "www.newsroad.co.kr": "뉴스로드", "www.venturesquare.net": "벤처스퀘어",
     "www.mdtoday.co.kr": "메디컬투데이", "www.asiaa.co.kr": "아시아A",
-    "www.medisobizanews.com": "메디소비즈", "www.seoulfn.com": "서울파이낸스",
-    "www.sports.co.kr": "스포츠닷컴",
+    "www.medisobizanews.com": "메디소비즈",
+    "www.digitaltoday.co.kr": "디지털투데이", "www.newsprime.co.kr": "뉴스프라임",
+    "www.sisain.co.kr": "시사인", "www.upinews.kr": "유피아이뉴스",
+    "www.theceluv.com": "더셀럽", "www.dementianews.co.kr": "디멘시아뉴스",
+    "www.moneys.mt.co.kr": "머니S", "moneys.mt.co.kr": "머니S",
+    "www.biztribune.co.kr": "비즈트리뷴", "www.newsworker.co.kr": "뉴스워커",
+    "www.dailypharm.com": "데일리팜", "www.yakup.com": "약업신문",
+    "www.segye.com": "세계일보", "www.opinionnews.co.kr": "오피니언뉴스",
 }
-
-
-def _to_korean_media(source: str) -> str:
-    """영문 매체명을 한글로 변환한다. 이미 한글이면 그대로 반환."""
-    if not source:
-        return "알수없음"
-    # 이미 한글이 포함되어 있으면 그대로
-    if re.search(r"[가-힣]", source):
-        return source
-    # 도메인 형태에서 매핑 시도
-    source_lower = source.lower().strip()
-    for domain, korean in DOMAIN_TO_KOREAN.items():
-        # 도메인의 주요 부분과 매칭
-        domain_key = domain.replace("www.", "").split(".")[0]
-        if source_lower == domain_key:
-            return korean
-    return source
 
 
 def collect_all() -> list[dict]:
@@ -729,7 +750,7 @@ def _render_article_line(a: dict) -> str:
     date_str = _article_date_prefix(a)
     title = a["title"]
     link = a["link"]
-    source = _to_korean_media(a["source"])
+    source = a["source"]
     others = a.get("others_count", 0)
     others_html = f' <span style="color:#C25A00;">외 {others}건</span>' if others > 0 else ""
     date_html = f'<span style="color:#C25A00;font-weight:bold;">{date_str}</span> &nbsp;' if date_str else ""
