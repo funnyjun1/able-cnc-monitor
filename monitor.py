@@ -487,10 +487,14 @@ def _filter_by_date(articles: list[dict]) -> list[dict]:
 def _filter_fashion_missha(articles: list[dict]) -> list[dict]:
     result = []
     for a in articles:
+        text = (a["title"] + " " + a.get("description", "")).lower()
+        # 패션 미샤(MICHAA/시선인터내셔널) 제외
         if a["search_keyword"] in ("미샤", "MISSHA", "missha"):
-            text = (a["title"] + " " + a.get("description", "")).lower()
             if any(excl in text for excl in FASHION_EXCLUDE):
                 continue
+        # 셀라피바이오 제외 (셀라피와 다른 회사)
+        if a["search_keyword"] == "셀라피" and "셀라피바이오" in text:
+            continue
         result.append(a)
     return result
 
@@ -562,8 +566,8 @@ def classify_articles(articles: list[dict]) -> dict:
 
 
 def _classify_batch(batch: list[dict]) -> dict:
-    major_str = ", ".join(COMPETITOR_MAJOR_KEYWORDS[:20]) + " 등"
-    indie_str = ", ".join(COMPETITOR_INDIE_KEYWORDS[:20]) + " 등"
+    major_str = ", ".join(COMPETITOR_MAJOR_KEYWORDS)
+    indie_str = ", ".join(COMPETITOR_INDIE_KEYWORDS)
 
     article_text = ""
     for i, a in enumerate(batch, 1):
@@ -590,6 +594,7 @@ def _classify_batch(batch: list[dict]) -> dict:
 - 단일 브랜드 중심 기사만 경쟁사로 분류
 - 복수 브랜드 나열 → 무조건 업계
 - 곁다리 언급 → 제외
+- 애경산업·루나·에이지투웨니스는 반드시 경쟁사메이저로 분류 (인디 아님)
 
 JSON 배열로만 응답:
 [{{"index":1,"category":"자사배포","sentiment":"긍정","summary":"한줄요약"}}]"""
@@ -1192,10 +1197,10 @@ if __name__ == "__main__":
     print("=" * 60)
 
     articles = collect_all()
-    social = collect_social_for_company()
+    # 블로그·카페 수집 제외 (클라이언트 피드백)
     categorized = classify_articles(articles)
     grouped = group_similar_articles(categorized)
-    send_report(categorized, grouped, social)
+    send_report(categorized, grouped)
 
     print("=" * 60)
     print(f"완료: {datetime.datetime.now()}")
