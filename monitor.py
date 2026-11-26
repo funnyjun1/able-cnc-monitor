@@ -719,17 +719,17 @@ def _build_html(today, weekday, total, summary_text, grouped, categorized, socia
 <html lang="ko"><head><meta charset="UTF-8">
 <title>ABLE C&amp;C DAILY MONITORING {today}</title>
 </head>
-<body style="margin:0;padding:0;background-color:#FAF6F1;font-family:{FONT};font-size:12px;">
+<body style="margin:0;padding:0;background-color:#FAF6F1;font-family:{FONT};font-size:11pt;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FAF6F1;">
 <tr><td align="center" style="padding:16px;">
-<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:{FONT};font-size:12px;color:#2B2620;">
+<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:{FONT};font-size:11pt;color:#2B2620;">
 
 <tr><td style="padding:2px 4px 12px 4px;border-bottom:3px solid #E8730C;">
-<div style="font-size:22px;font-weight:bold;color:#2B2620;letter-spacing:.5px;font-family:{FONT};">ABLE C&amp;C · DAILY MONITORING</div>
+<div style="font-size:16pt;font-weight:bold;color:#2B2620;letter-spacing:.5px;font-family:{FONT};">ABLE C&amp;C · DAILY MONITORING</div>
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:9px;">
 <tr><td style="vertical-align:bottom;">
-<span style="font-size:15px;font-weight:bold;color:#C25A00;font-family:{FONT};">{today.replace('-', '. ')} ({weekday})</span>
-</td><td align="right" style="vertical-align:bottom;font-size:10px;color:#857B6F;font-family:{FONT};">
+<span style="font-size:12pt;font-weight:bold;color:#C25A00;font-family:{FONT};">{today.replace('-', '. ')} ({weekday})</span>
+</td><td align="right" style="vertical-align:bottom;font-size:8pt;color:#857B6F;font-family:{FONT};">
 모니터링 기간 &nbsp;{period_str}
 </td></tr></table>
 </td></tr>"""
@@ -743,8 +743,8 @@ def _build_html(today, weekday, total, summary_text, grouped, categorized, socia
             html += f"""<tr><td style="padding:14px 0 0 0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFF7EC;border:1px solid #F3C79B;">
 <tr><td style="padding:16px 18px;">
-<div style="font-size:13px;font-weight:bold;color:#2B2620;padding-bottom:8px;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">Today Summary</div>
-<div style="font-size:12px;color:#4a4036;line-height:1.8;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">{summary_text}</div>
+<div style="font-size:11pt;font-weight:bold;color:#2B2620;padding-bottom:8px;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">Today Summary</div>
+<div style="font-size:11pt;color:#4a4036;line-height:1.8;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">{summary_text}</div>
 </td></tr></table></td></tr>"""
 
         # 경쟁사 메이저+인디 통합
@@ -819,9 +819,9 @@ def _build_html(today, weekday, total, summary_text, grouped, categorized, socia
 
     html += f"""<tr><td style="padding:16px 0 0 0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E5DACB;">
-<tr><td align="center" style="padding:12px 15px;font-size:10px;color:#857B6F;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">
+<tr><td align="center" style="padding:12px 15px;font-size:8pt;color:#857B6F;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">
 Monitoring by <b style="color:#2B2620;">프라우드컴(주)</b> · Copyright 2026 Proudcomm<br>
-<span style="font-size:10px;color:#aaa;">네이버 뉴스 API | Claude AI 분류 | v3</span>
+<span style="font-size:8pt;color:#aaa;">네이버 뉴스 API | Claude AI 분류 | v3</span>
 </td></tr></table></td></tr>
 
 </table></td></tr></table></body></html>"""
@@ -860,9 +860,9 @@ def _render_article_line(a: dict) -> str:
     others_html = f' <span style="color:#C25A00;">외 {others}건</span>' if others > 0 else ""
     date_html = f'<span style="color:#C25A00;font-weight:bold;">{date_str}</span> &nbsp;' if date_str else ""
 
-    return f"""<div style="font-size:12px;padding:7px 0 7px 12px;line-height:1.6;font-family:{FONT};">
+    return f"""<div style="font-size:11pt;padding:7px 0 7px 12px;line-height:1.6;font-family:{FONT};">
 {date_html}<a href="{link}" style="color:#2B2620;text-decoration:none;font-weight:bold;">{title}</a>{others_html}
-<span style="color:#C25A00;font-size:11px;"> {source} ›</span></div>"""
+<span style="color:#C25A00;font-size:9pt;"> {source} ›</span></div>"""
 
 
 def _build_section_with_subs(num, label, accent_color, sub_sections):
@@ -871,13 +871,13 @@ def _build_section_with_subs(num, label, accent_color, sub_sections):
     s = f"""<tr><td style="padding:14px 0 0 0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFFFF;border:1px solid #ECE3D8;">
 <tr><td style="padding:16px 18px;">
-<div style="font-size:14px;font-weight:bold;color:#2B2620;padding-bottom:10px;font-family:{FONT};">
+<div style="font-size:12pt;font-weight:bold;color:#2B2620;padding-bottom:10px;font-family:{FONT};">
 <span style="color:{accent_color};">{num}</span> &nbsp;&nbsp;{label}</div>"""
 
     for sub_name, articles in sub_sections:
         if not articles:
             continue
-        s += f"""<div style="font-size:12px;font-weight:bold;color:#E8730C;padding:8px 0 2px 0;border-top:2px solid #F2ECE3;font-family:{FONT};">▌{sub_name}</div>"""
+        s += f"""<div style="font-size:11pt;font-weight:bold;color:#E8730C;padding:8px 0 2px 0;border-top:2px solid #F2ECE3;font-family:{FONT};">▌{sub_name}</div>"""
         for a in articles:
             s += _render_article_line(a)
 
@@ -891,7 +891,7 @@ def _build_section_flat(num, label, accent_color, articles):
     s = f"""<tr><td style="padding:14px 0 0 0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFFFF;border:1px solid #ECE3D8;">
 <tr><td style="padding:16px 18px;">
-<div style="font-size:14px;font-weight:bold;color:#2B2620;padding-bottom:6px;font-family:{FONT};">
+<div style="font-size:12pt;font-weight:bold;color:#2B2620;padding-bottom:6px;font-family:{FONT};">
 <span style="color:{accent_color};">{num}</span> &nbsp;&nbsp;{label}</div>"""
 
     for a in articles:
