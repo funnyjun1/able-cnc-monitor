@@ -719,10 +719,10 @@ def _build_html(today, weekday, total, summary_text, grouped, categorized, socia
 <html lang="ko"><head><meta charset="UTF-8">
 <title>ABLE C&amp;C DAILY MONITORING {today}</title>
 </head>
-<body style="margin:0;padding:0;background-color:#FAF6F1;font-family:{FONT};font-size:11px;">
+<body style="margin:0;padding:0;background-color:#FAF6F1;font-family:{FONT};font-size:12px;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FAF6F1;">
 <tr><td align="center" style="padding:16px;">
-<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:{FONT};font-size:11px;color:#2B2620;">
+<table width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;font-family:{FONT};font-size:12px;color:#2B2620;">
 
 <tr><td style="padding:2px 4px 12px 4px;border-bottom:3px solid #E8730C;">
 <div style="font-size:22px;font-weight:bold;color:#2B2620;letter-spacing:.5px;font-family:{FONT};">ABLE C&amp;C · DAILY MONITORING</div>
@@ -744,7 +744,7 @@ def _build_html(today, weekday, total, summary_text, grouped, categorized, socia
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFF7EC;border:1px solid #F3C79B;">
 <tr><td style="padding:16px 18px;">
 <div style="font-size:13px;font-weight:bold;color:#2B2620;padding-bottom:8px;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">Today Summary</div>
-<div style="font-size:11px;color:#4a4036;line-height:1.8;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">{summary_text}</div>
+<div style="font-size:12px;color:#4a4036;line-height:1.8;font-family:'Malgun Gothic','맑은 고딕',sans-serif;">{summary_text}</div>
 </td></tr></table></td></tr>"""
 
         # 경쟁사 메이저+인디 통합
@@ -860,9 +860,9 @@ def _render_article_line(a: dict) -> str:
     others_html = f' <span style="color:#C25A00;">외 {others}건</span>' if others > 0 else ""
     date_html = f'<span style="color:#C25A00;font-weight:bold;">{date_str}</span> &nbsp;' if date_str else ""
 
-    return f"""<div style="font-size:11px;padding:6px 0 6px 12px;line-height:1.5;font-family:{FONT};">
-{date_html}<a href="{link}" style="color:#2B2620;text-decoration:none;">{title}</a>{others_html}
-<span style="color:#C25A00;font-size:10px;"> {source} ›</span></div>"""
+    return f"""<div style="font-size:12px;padding:7px 0 7px 12px;line-height:1.6;font-family:{FONT};">
+{date_html}<a href="{link}" style="color:#2B2620;text-decoration:none;font-weight:bold;">{title}</a>{others_html}
+<span style="color:#C25A00;font-size:11px;"> {source} ›</span></div>"""
 
 
 def _build_section_with_subs(num, label, accent_color, sub_sections):
@@ -877,7 +877,7 @@ def _build_section_with_subs(num, label, accent_color, sub_sections):
     for sub_name, articles in sub_sections:
         if not articles:
             continue
-        s += f"""<div style="font-size:11px;font-weight:bold;color:#E8730C;padding:8px 0 2px 0;border-top:2px solid #F2ECE3;font-family:{FONT};">▌{sub_name}</div>"""
+        s += f"""<div style="font-size:12px;font-weight:bold;color:#E8730C;padding:8px 0 2px 0;border-top:2px solid #F2ECE3;font-family:{FONT};">▌{sub_name}</div>"""
         for a in articles:
             s += _render_article_line(a)
 
