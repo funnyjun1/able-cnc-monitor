@@ -397,6 +397,30 @@ DOMAIN_TO_KOREAN = {
     "www.biztribune.co.kr": "비즈트리뷴", "www.newsworker.co.kr": "뉴스워커",
     "www.dailypharm.com": "데일리팜", "www.yakup.com": "약업신문",
     "www.segye.com": "세계일보", "www.opinionnews.co.kr": "오피니언뉴스",
+    # === 추가 매체 ===
+    "www.fntoday.co.kr": "파이낸셜투데이", "fntoday.co.kr": "파이낸셜투데이",
+    "www.theguru.co.kr": "더구루", "theguru.co.kr": "더구루",
+    "www.wowtv.co.kr": "한국경제TV", "www.sentv.co.kr": "서울경제TV",
+    "www.getnews.co.kr": "겟뉴스", "www.newstomato.com": "뉴스토마토",
+    "www.newstof.com": "뉴스토프", "www.tfmedia.co.kr": "TF미디어",
+    "www.news-paper.co.kr": "뉴스페이퍼", "www.paxnetnews.com": "팍스넷뉴스",
+    "www.straightnews.co.kr": "스트레이트뉴스", "www.daejonilbo.com": "대전일보",
+    "www.busan.com": "부산일보", "www.kwnews.co.kr": "강원일보",
+    "www.jjan.kr": "전북일보", "www.hg-times.com": "화장품경제",
+    "www.beautybiz.co.kr": "뷰티비즈", "www.cosmetic-news.co.kr": "코스메틱뉴스",
+    "www.c-news.kr": "씨뉴스", "www.newsinside.kr": "뉴스인사이드",
+    "www.dailysecu.com": "데일리시큐", "www.sisanewsn.co.kr": "시사뉴스앤",
+    "www.kihoilbo.co.kr": "기호일보", "www.gnnews.co.kr": "경남일보",
+    "www.gjdream.com": "광주드림", "www.joongdo.co.kr": "중도일보",
+    "www.ksilbo.co.kr": "경상일보", "www.dtoday.co.kr": "디투데이",
+    "www.tvreport.co.kr": "TV리포트", "www.heraldpop.com": "헤럴드팝",
+    "www.mhns.co.kr": "문화뉴스", "www.kmib.co.kr": "국민일보",
+    "www.ilyoseoul.co.kr": "일요서울", "www.newscj.com": "뉴스천지",
+    "www.wikitree.co.kr": "위키트리", "www.bizwatch.co.kr": "비즈워치",
+    "www.bloter.net": "블로터", "www.moneytoday.co.kr": "머니투데이",
+    "www.medigate.net": "메디게이트뉴스", "www.pharmnews.com": "팜뉴스",
+    "www.hitnews.co.kr": "히트뉴스", "www.ktnews.com": "KT뉴스",
+    "www.wolyo.co.kr": "월요신문", "www.it-b.co.kr": "잇비뉴스",
 }
 
 
@@ -855,18 +879,16 @@ def _article_date_prefix(article: dict) -> str:
 
 
 def _render_article_line(a: dict) -> str:
-    """참조 디자인: 날짜 + 헤드라인 + 외N건 + 매체명."""
+    """날짜 | 헤드라인 | 매체명 (3요소만)."""
     FONT = "'Malgun Gothic','맑은 고딕',sans-serif"
     date_str = _article_date_prefix(a)
     title = a["title"]
     link = a["link"]
     source = a["source"]
-    others = a.get("others_count", 0)
-    others_html = f' <span style="color:#C25A00;">외 {others}건</span>' if others > 0 else ""
     date_html = f'<span style="color:#C25A00;font-weight:bold;">{date_str}</span> &nbsp;' if date_str else ""
 
     return f"""<div style="font-size:11pt;padding:7px 0 7px 12px;line-height:1.6;font-family:{FONT};">
-{date_html}<a href="{link}" style="color:#2B2620;text-decoration:none;font-weight:bold;">{title}</a>{others_html}
+{date_html}<a href="{link}" style="color:#2B2620;text-decoration:none;font-weight:bold;">{title}</a>
 <span style="color:#C25A00;font-size:9pt;"> {source} ›</span></div>"""
 
 
