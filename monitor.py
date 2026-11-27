@@ -296,6 +296,8 @@ def _fetch_rss(url: str, keyword: str, source: str) -> list[dict]:
         return []
 
 
+_unmapped_domains = set()  # 미등록 도메인 추적용
+
 def _extract_media_name(url: str) -> str:
     """URL에서 한글 매체명을 추출한다."""
     try:
@@ -317,10 +319,13 @@ def _extract_media_name(url: str) -> str:
         for k, v in DOMAIN_TO_KOREAN.items():
             k2 = k[4:] if k.startswith("www.") else k
             k_parts = k2.split(".")
-            # 주요 단어가 겹치면 매칭
             if set(parts) & set(k_parts) - {"co", "kr", "com", "net", "org", "or"}:
                 return v
-        return d.split(".")[0]
+        # 미등록 도메인 로그 (실행 종료 시 한번에 출력)
+        fallback = d.split(".")[0]
+        if domain not in _unmapped_domains:
+            _unmapped_domains.add(domain)
+        return fallback
     except Exception:
         return "알수없음"
 
@@ -421,6 +426,40 @@ DOMAIN_TO_KOREAN = {
     "www.medigate.net": "메디게이트뉴스", "www.pharmnews.com": "팜뉴스",
     "www.hitnews.co.kr": "히트뉴스", "www.ktnews.com": "KT뉴스",
     "www.wolyo.co.kr": "월요신문", "www.it-b.co.kr": "잇비뉴스",
+    # === 추가 매체 (11/27) ===
+    "www.kpenews.com": "한국정경뉴스", "kpenews.com": "한국정경뉴스",
+    "www.dailyimpact.co.kr": "데일리임팩트", "www.fpn119.co.kr": "소방방재신문",
+    "www.newscape.co.kr": "뉴스케이프", "www.efnews.co.kr": "이에프뉴스",
+    "www.sisamagazine.co.kr": "시사매거진", "www.newswatch.kr": "뉴스워치",
+    "www.sisafocus.co.kr": "시사포커스", "www.cnbnews.com": "CNB뉴스",
+    "www.brandbrief.co.kr": "브랜드브리프", "www.sisaon.co.kr": "시사ON",
+    "www.dailymedi.com": "데일리메디", "www.mdsobiz.com": "엠디소비즈",
+    "www.ohmynews.com": "오마이뉴스", "www.pressian.com": "프레시안",
+    "www.mediatoday.co.kr": "미디어오늘", "www.journalist.or.kr": "한국기자협회",
+    "www.newstap.co.kr": "뉴스탭", "www.consumernews.co.kr": "소비자뉴스",
+    "www.hansbiz.co.kr": "한스비즈", "www.meconomynews.com": "엠이코노미뉴스",
+    "www.etnews.com": "전자신문", "etnews.com": "전자신문",
+    "www.techm.kr": "테크M", "www.zdnet.co.kr": "지디넷코리아",
+    "www.ceoscoredaily.com": "CEO스코어데일리", "www.thestock.co.kr": "더스탁",
+    "www.thewordnews.co.kr": "더워드뉴스", "www.medigatenews.com": "메디게이트뉴스",
+    "www.thepharma.co.kr": "더파마", "www.pharmnews.com": "팜뉴스",
+    "www.hitnews.co.kr": "히트뉴스", "www.viva100.com": "비바100",
+    "www.shindongnews.co.kr": "신동뉴스", "www.onbao.com": "온바오",
+    "www.cosinkorea.com": "코스인코리아", "cosinkorea.com": "코스인코리아",
+    "www.hg-times.com": "화장품경제", "www.beautybiz.co.kr": "뷰티비즈",
+    "www.cosmetic-news.co.kr": "코스메틱뉴스", "www.cncnews.co.kr": "CNC뉴스",
+    "www.c-news.kr": "씨뉴스", "www.newsinside.kr": "뉴스인사이드",
+    "www.thevaluenews.co.kr": "더밸류뉴스", "www.fetv.co.kr": "FE금융경제",
+    "www.newsim.co.kr": "뉴심", "www.apnews.kr": "AP뉴스",
+    "www.m-i.kr": "매일산업뉴스", "www.asiatime.co.kr": "아시아타임즈",
+    "www.lcnews.co.kr": "르씨엘뉴스", "www.lecturernews.com": "한국강사신문",
+    "www.wikileaks-kr.org": "위키리크스한국", "www.newstown.co.kr": "뉴스타운",
+    "www.joseilbo.com": "조세일보", "www.taxtimes.co.kr": "세정일보",
+    "www.startuptoday.kr": "스타트업투데이", "www.startupn.kr": "스타트업엔",
+    "www.jobsn.com": "잡스엔", "www.mdilbo.com": "무등일보",
+    "www.headlinejeju.co.kr": "헤드라인제주", "www.jejunews.com": "제주뉴스",
+    "www.kyeongin.com": "경인일보", "www.imaeil.com": "매일신문",
+    "www.kookje.co.kr": "국제신문", "www.jnilbo.com": "전남일보",
 }
 
 
@@ -690,7 +729,16 @@ def _is_similar(title_a: str, title_b: str) -> bool:
     min_len = min(len(words_a), len(words_b))
     if min_len == 0:
         return False
-    return overlap / min_len >= 0.6
+    # 1. 기존 60% 한글 단어 겹침
+    if overlap / min_len >= 0.6:
+        return True
+    # 2. 핵심 고유명사(2글자 이상) 겹침이 3개 이상이면 유사
+    long_a = {w for w in words_a if len(w) >= 2}
+    long_b = {w for w in words_b if len(w) >= 2}
+    long_overlap = long_a & long_b
+    if len(long_overlap) >= 3:
+        return True
+    return False
 
 
 # ═══════════════════════════════════════════
@@ -1223,6 +1271,12 @@ if __name__ == "__main__":
     categorized = classify_articles(articles)
     grouped = group_similar_articles(categorized)
     send_report(categorized, grouped)
+
+    # 미등록 도메인 출력 (매체명 한글 매핑 추가 필요)
+    if _unmapped_domains:
+        print(f"[매체] 미등록 도메인 {len(_unmapped_domains)}개:")
+        for d in sorted(_unmapped_domains):
+            print(f"  - {d}")
 
     print("=" * 60)
     print(f"완료: {datetime.datetime.now()}")
