@@ -163,101 +163,6 @@ def collect_naver_api(keyword: str, display: int = 100) -> list[dict]:
         return []
 
 
-def collect_naver_blog(keyword: str, display: int = 30) -> list[dict]:
-    """네이버 블로그 검색 API로 자사 키워드 블로그 글을 수집한다."""
-    if not NAVER_CLIENT_ID:
-        return []
-    encoded = urllib.parse.quote(keyword)
-    url = f"https://naverapihub.apigw.ntruss.com/search/v1/blog?query={encoded}&display={display}&sort=date"
-    req = urllib.request.Request(url)
-    req.add_header("X-NCP-APIGW-API-KEY-ID", NAVER_CLIENT_ID)
-    req.add_header("X-NCP-APIGW-API-KEY", NAVER_CLIENT_SECRET)
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        results = []
-        for item in data.get("items", []):
-            title = _strip_html(item.get("title", ""))
-            link = item.get("link", "")
-            blogger = _strip_html(item.get("bloggername", ""))
-            pub_date = item.get("postdate", "")  # YYYYMMDD 형식
-            results.append({
-                "title": title, "link": link,
-                "source": blogger if blogger else "블로그",
-                "pub_date_raw": pub_date,
-                "search_keyword": keyword, "type": "blog",
-            })
-        return results
-    except Exception as e:
-        print(f"[수집] 블로그 API 오류 ({keyword}): {e}")
-        return []
-
-
-def collect_naver_cafe(keyword: str, display: int = 30) -> list[dict]:
-    """네이버 카페 검색 API로 자사 키워드 카페 글을 수집한다."""
-    if not NAVER_CLIENT_ID:
-        return []
-    encoded = urllib.parse.quote(keyword)
-    url = f"https://naverapihub.apigw.ntruss.com/search/v1/cafearticle?query={encoded}&display={display}&sort=date"
-    req = urllib.request.Request(url)
-    req.add_header("X-NCP-APIGW-API-KEY-ID", NAVER_CLIENT_ID)
-    req.add_header("X-NCP-APIGW-API-KEY", NAVER_CLIENT_SECRET)
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        results = []
-        for item in data.get("items", []):
-            title = _strip_html(item.get("title", ""))
-            link = item.get("link", "")
-            cafe_name = _strip_html(item.get("cafename", ""))
-            pub_date = item.get("postdate", "")  # YYYYMMDD 형식 아님, 별도 처리 필요 없음
-            results.append({
-                "title": title, "link": link,
-                "source": cafe_name if cafe_name else "카페",
-                "pub_date_raw": pub_date,
-                "search_keyword": keyword, "type": "cafe",
-            })
-        return results
-    except Exception as e:
-        print(f"[수집] 카페 API 오류 ({keyword}): {e}")
-        return []
-
-
-def collect_social_for_company() -> list[dict]:
-    """자사 키워드로만 블로그+카페를 수집한다."""
-    social = []
-    for kw in COMPANY_KEYWORDS:
-        social.extend(collect_naver_blog(kw))
-        social.extend(collect_naver_cafe(kw))
-        time.sleep(0.1)
-    # 중복 제거 (제목 기준)
-    seen = set()
-    unique = []
-    for s in social:
-        key = _article_hash(s["title"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(s)
-    # 날짜 필터 (postdate: YYYYMMDD)
-    now_kst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
-    search_days = int(os.environ.get("SEARCH_DAYS", "1"))
-    cutoff = (now_kst - datetime.timedelta(days=search_days)).strftime("%Y%m%d")
-    filtered = []
-    for s in unique:
-        pd = s.get("pub_date_raw", "")
-        if not pd or pd >= cutoff:
-            filtered.append(s)
-    # 패션 미샤 필터
-    result = []
-    for s in filtered:
-        if s["search_keyword"] in ("미샤", "MISSHA", "missha"):
-            text = s["title"].lower()
-            if any(excl in text for excl in FASHION_EXCLUDE):
-                continue
-        result.append(s)
-    print(f"[수집] 블로그·카페: {len(social)}건 → 중복제거 {len(unique)}건 → 필터 후 {len(result)}건")
-    return result
-
 
 def collect_google_rss(keyword: str) -> list[dict]:
     encoded = urllib.parse.quote(keyword)
@@ -936,13 +841,13 @@ def _is_similar(title_a: str, title_b: str) -> bool:
 # 3단계: 발송
 # ═══════════════════════════════════════════
 
-def send_report(categorized: dict, grouped: dict, social: list = None) -> bool:
+def send_report(categorized: dict, grouped: dict) -> bool:
     today = datetime.date.today().strftime("%Y-%m-%d")
     weekday = ["월", "화", "수", "목", "금", "토", "일"][datetime.date.today().weekday()]
     total = sum(len(v) for v in categorized.values())
 
     summary_text = _generate_summary(categorized) if total > 0 else ""
-    html = _build_html(today, weekday, total, summary_text, grouped, categorized, social or [])
+    html = _build_html(today, weekday, total, summary_text, grouped, categorized)
 
     parts = []
     comp_count = len(categorized.get("경쟁사메이저", [])) + len(categorized.get("경쟁사인디", []))
@@ -968,7 +873,7 @@ def send_report(categorized: dict, grouped: dict, social: list = None) -> bool:
     return success
 
 
-def _build_html(today, weekday, total, summary_text, grouped, categorized, social=None):
+def _build_html(today, weekday, total, summary_text, grouped, categorized):
     FONT = "'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif"
 
     # 모니터링 기간 계산
@@ -1065,14 +970,12 @@ def _build_html(today, weekday, total, summary_text, grouped, categorized, socia
 
         jasa_baepo = grouped.get("자사배포", [])
         jasa_news = grouped.get("자사언급", [])
-        social_items = (social or [])[:20]  # 블로그·카페 상위 20건 제한
-
-        # 1. 자사 섹션 (배포 + 뉴스 + 블로그·카페 서브)
-        if jasa_baepo or jasa_news or social_items:
-            subs = [("배포", jasa_baepo), ("뉴스", jasa_news)]
-            if social_items:
-                subs.append(("블로그·카페", social_items))
-            html += _build_section_with_subs("1", "자사", "#E8730C", subs)
+        # 1. 자사 섹션 (배포 + 뉴스 서브)
+        if jasa_baepo or jasa_news:
+            html += _build_section_with_subs("1", "자사", "#E8730C", [
+                ("배포", jasa_baepo),
+                ("뉴스", jasa_news),
+            ])
 
         # 3. 경쟁사 섹션 (메이저 + 인디 서브)
         if comp_major or comp_indie:
@@ -1098,14 +1001,6 @@ Monitoring by <b style="color:#2B2620;">프라우드컴(주)</b> · Copyright 20
 
 def _article_date_prefix(article: dict) -> str:
     """기사 날짜에서 M/D 형식 추출."""
-    # 블로그/카페: pub_date_raw (YYYYMMDD)
-    raw = article.get("pub_date_raw", "")
-    if raw and len(raw) == 8:
-        try:
-            return f"{int(raw[4:6])}/{int(raw[6:8])}"
-        except Exception:
-            pass
-    # 뉴스: pub_date (RFC 2822)
     pub_date = article.get("pub_date", "")
     if not pub_date:
         return ""
@@ -1458,7 +1353,6 @@ if __name__ == "__main__":
     print("=" * 60)
 
     articles = collect_all()
-    # 블로그·카페 수집 제외 (클라이언트 피드백)
     categorized = classify_articles(articles)
     grouped = group_similar_articles(categorized)
     send_report(categorized, grouped)
